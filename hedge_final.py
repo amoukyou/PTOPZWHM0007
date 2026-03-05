@@ -303,6 +303,78 @@ def chart_backtest(backtest):
     return fig.to_json()
 
 
+def calc_portfolio_nav(df_hold, strategies):
+    """For each strategy, calculate daily portfolio NAV = fund + put MTM - cumulative premiums."""
+    dates = df_hold['Date'].values
+    fund_nav = df_hold['fund'].values
+    ibex = df_hold['ibex'].values
+    # Normalize fund to FUND_VALUE at start
+    fund_ratio = fund_nav / fund_nav[0]
+    fund_eur = fund_ratio * FUND_VALUE
+
+    result = {'dates': dates, 'fund_eur': fund_eur, 'ibex_ratio': ibex / ibex[0]}
+
+    for skey in ['12M_ATM', '6M_ATM', '3M_ATM']:
+        s = strategies[skey]
+        port = np.copy(fund_eur)
+        cum_prem = 0.0
+
+        for pos in s['positions']:
+            cum_prem += pos['premium']
+            for t in range(pos['buy_idx'], pos['expiry_idx'] + 1):
+                remaining_T = max((pos['expiry_idx'] - t) / 252, 0.001)
+                put_mtm = bs_put(ibex[t], pos['strike'], remaining_T) * N_CONTRACTS
+                port[t] = fund_eur[t] + put_mtm - cum_prem
+
+        result[skey] = port
+
+    return result
+
+
+def chart_portfolio_nav(df_hold, strategies, hold_events):
+    """Line chart: fund NAV vs portfolio NAV (fund+put) for each strategy."""
+    nav = calc_portfolio_nav(df_hold, strategies)
+    dates = nav['dates']
+
+    fig = go.Figure()
+
+    # IBEX as secondary reference (right axis)
+    fig.add_trace(go.Scatter(x=dates, y=(nav['ibex_ratio'] - 1) * 100,
+        name='IBEX35', mode='lines', line=dict(color='#e65100', width=1.5, dash='dot'),
+        opacity=0.5, yaxis='y2',
+        hovertemplate='%{x|%Y-%m-%d}<br>IBEX: %{y:+.1f}%<extra></extra>'))
+
+    # Fund only
+    fig.add_trace(go.Scatter(x=dates, y=nav['fund_eur'],
+        name='基金(不对冲)', mode='lines', line=dict(color='#c62828', width=2.5, dash='dash'),
+        hovertemplate='%{x|%Y-%m-%d}<br>基金: EUR%{y:,.0f}<extra></extra>'))
+
+    # Strategies
+    strat_styles = {
+        '12M_ATM': ('基金+12月ATM年滚(推荐)', '#2e7d32', 3, None),
+        '6M_ATM':  ('基金+6月ATM半年滚', '#1565c0', 2, None),
+        '3M_ATM':  ('基金+3月ATM季滚', '#6a1b9a', 1.5, 'dot'),
+    }
+    for skey, (name, color, width, dash) in strat_styles.items():
+        fig.add_trace(go.Scatter(x=dates, y=nav[skey],
+            name=name, mode='lines',
+            line=dict(color=color, width=width, dash=dash),
+            hovertemplate=f'%{{x|%Y-%m-%d}}<br>{name}: EUR%{{y:,.0f}}<extra></extra>'))
+
+    # Mark drawdown periods
+    for ev in hold_events:
+        color = '#c8e6c9' if ev['sync'] else '#fff9c4'
+        fig.add_vrect(x0=ev['start'], x1=ev['end'], fillcolor=color, opacity=0.15)
+
+    fig.update_layout(template='plotly_white', height=460,
+        yaxis=dict(title='组合净值 (EUR)', side='left'),
+        yaxis2=dict(title='IBEX涨跌 (%)', overlaying='y', side='right',
+                    showgrid=False, zeroline=False),
+        legend=dict(x=0.01, y=0.01, bgcolor='rgba(255,255,255,0.9)', font=dict(size=11)),
+        margin=dict(t=10, b=30, l=70, r=60), hovermode='x unified')
+    return fig.to_json()
+
+
 def chart_strategy_bars(hold_events, strategies):
     """Grouped bar: coverage % for each holding-period event, per strategy."""
     strat_order = ['12M_ATM', '6M_ATM', '3M_ATM']
@@ -366,7 +438,8 @@ def generate_html(fund_df, psi_df, res):
     c1 = chart_fund_psi(fund_df, psi_df)
     c2 = chart_fund_ibex(df, all_events)
     c3 = chart_backtest(backtest)
-    c4 = chart_strategy_bars(hold_events, strats)
+    c4 = chart_portfolio_nav(res['df_hold'], strats, hold_events)
+    c4b = chart_strategy_bars(hold_events, strats)
     c5 = chart_payoff(rec)
 
     fund_gain = (FUND_CURR_PRICE / FUND_ENTRY_PRICE - 1) * 100
@@ -640,6 +713,14 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   {detail_rows}
 </table>
 
+<p style="margin-bottom:12px"><b>组合净值走势：如果你同时持有基金+Put，历史上净值是怎么走的？</b></p>
+<div class="chart-box"><div id="c4" style="height:460px"></div></div>
+<p class="note-sm">
+  红虚线=只持有基金（不对冲）。绿/蓝/紫实线=基金+不同频率的Put组合。
+  阴影区域=基金回撤期。橙虚线=IBEX35走势（右轴）。<br>
+  组合净值 = 基金市值 + Put当前市价 - 已付保费总额。可以看到回撤时绿线比红线跌得少。
+</p>
+
 <p style="margin-bottom:16px"><b>三种频率横向对比：</b></p>
 <table>
   <tr><th>回撤期</th><th>基金损失</th>
@@ -649,7 +730,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   {compare_rows}
 </table>
 
-<div class="chart-box"><div id="c4" style="height:400px"></div></div>
+<div class="chart-box"><div id="c4b" style="height:400px"></div></div>
 
 <div class="alert a-info">
   <b>关键发现：更频繁地滚仓并不能显著提高保护效果。</b><br>
@@ -751,12 +832,13 @@ Plotly.newPlot('c1',__C1__.data,__C1__.layout,{{responsive:true}});
 Plotly.newPlot('c2',__C2__.data,__C2__.layout,{{responsive:true}});
 Plotly.newPlot('c3',__C3__.data,__C3__.layout,{{responsive:true}});
 Plotly.newPlot('c4',__C4__.data,__C4__.layout,{{responsive:true}});
+Plotly.newPlot('c4b',__C4B__.data,__C4B__.layout,{{responsive:true}});
 Plotly.newPlot('c5',__C5__.data,__C5__.layout,{{responsive:true}});
 </script>
 </body></html>"""
 
-    for i, c in enumerate([c1, c2, c3, c4, c5], 1):
-        html = html.replace(f'__C{i}__', c)
+    html = html.replace('__C1__', c1).replace('__C2__', c2).replace('__C3__', c3)
+    html = html.replace('__C4__', c4).replace('__C4B__', c4b).replace('__C5__', c5)
     return html
 
 
