@@ -183,6 +183,16 @@ def analyze(fund_df, ibex_df, psi_df, live):
         for k, s in strats.items():
             mtm, strike = get_put_mtm(s['positions'], ev['ibex_level'], idx)
             ev['strat'][k] = dict(mtm=mtm, strike=strike, cov=mtm/loss*100 if loss>0 else 0)
+    # Empirical crash ratio: fund_drop / ibex_drop during each event
+    crash_ratios = []
+    for ev in events:
+        if ev['ibex_chg'] < -1.5 and ev['fund_chg'] < -1.5:
+            ratio = ev['fund_chg'] / ev['ibex_chg']
+            ev['crash_ratio'] = round(ratio, 3)
+            crash_ratios.append(ratio)
+        else:
+            ev['crash_ratio'] = None
+    avg_crash_ratio = round(np.mean(crash_ratios), 3) if crash_ratios else BETA_FUND_IBEX
     # Recommendation (base: 16 contracts)
     K = round(ibex_now / 50) * 50  # MEFF标准行权价间距50点
     p1 = bs_put(ibex_now, K, 1.0)
@@ -208,7 +218,7 @@ def analyze(fund_df, ibex_df, psi_df, live):
             scenarios[drop_pct] = dict(payoff=round(put_payoff))
         options.append(dict(label=label, desc=desc, legs=legs, prem=prem,
                             annual_pct=round(prem/fv*100, 2), five_yr=prem*5, scenarios=scenarios))
-    # PSI20 scenario table for section 六 — using recommended mixed config
+    # PSI20 scenario table for section 六 — Plan A: recommended mixed config
     rec_legs = configs[1][2]  # ATM×8 + 90%OTM×20
     rec_prem = round(sum(p * n for n, k, p in rec_legs))
     psi_scenarios = []
@@ -223,9 +233,26 @@ def analyze(fund_df, ibex_df, psi_df, live):
             psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
             put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
             cov=round(put_pay/fund_loss*100) if fund_loss > 0 else 0))
+    # Plan B: pure 90%OTM×24
+    planb_legs = configs[3][2]  # 纯90%OTM ×24
+    planb_prem = round(sum(p * n for n, k, p in planb_legs))
+    psi_scenarios_b = []
+    for psi_target in [8500, 8000, 7500, 7000, 6000]:
+        psi_drop_pct = (psi_target - psi_now) / psi_now
+        ibex_est = ibex_now * (1 + BETA_IBEX_PSI * psi_drop_pct)
+        fund_est = fv * (1 + BETA_FUND_PSI * psi_drop_pct)
+        fund_loss = fv - fund_est
+        put_pay = sum(max(k - ibex_est, 0) * n for n, k, p in planb_legs)
+        net = fund_est + put_pay - planb_prem
+        psi_scenarios_b.append(dict(
+            psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
+            put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
+            cov=round(put_pay/fund_loss*100) if fund_loss > 0 else 0))
     return dict(df=df, df_h=df_h, events=events, strats=strats, rec=rec,
                 options=options, psi_scenarios=psi_scenarios,
-                K_90=K_90, rec_prem=rec_prem)
+                psi_scenarios_b=psi_scenarios_b,
+                K_90=K_90, rec_prem=rec_prem, planb_prem=planb_prem,
+                avg_crash_ratio=avg_crash_ratio, crash_ratios=crash_ratios)
 
 # ─── Charts ──────────────────────────────
 def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
@@ -355,12 +382,48 @@ def chart_payoff(rec, live):
         margin=dict(t=10,b=50,l=80,r=20), hovermode='x unified')
     return fig.to_json()
 
+def chart_payoff_planb(rec, live):
+    """损益图：Plan B 纯OTM×24"""
+    fv, psi_now, ibex_now = live['fund_value'], live['psi'], live['ibex']
+    K_90 = round(ibex_now * 0.90 / 50) * 50
+    p_90 = bs_put(ibex_now, K_90, 1.0)
+    otm_prem = round(p_90*24)
+    psi_x = np.linspace(5000, 11000, 500)
+    psi_ret = (psi_x - psi_now) / psi_now
+    ibex_est = ibex_now * (1 + BETA_IBEX_PSI * psi_ret)
+    fund_val = fv * (1 + BETA_FUND_PSI * psi_ret)
+    otm_pay = np.maximum(K_90 - ibex_est, 0) * 24
+    otm_hedged = fund_val + otm_pay - otm_prem
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=psi_x, y=fund_val, name='不对冲',
+        line=dict(color='#c62828',width=2.5,dash='dot'),
+        hovertemplate='PSI20:%{x:,.0f}<br>基金:€%{y:,.0f}<extra></extra>'))
+    fig.add_trace(go.Scatter(x=psi_x, y=otm_hedged, name=f'纯OTM×24 (€{otm_prem:,}/年)',
+        line=dict(color='#e65100',width=3),
+        hovertemplate='PSI20:%{x:,.0f}<br>OTM:€%{y:,.0f}<extra></extra>'))
+    fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
+        annotation_text=f'当前€{fv:,}', annotation_position='top left', annotation_font=dict(size=10,color='gray'))
+    fig.add_vline(x=psi_now, line_dash='dot', line_color='gray', opacity=0.4,
+        annotation_text=f'当前PSI20 {psi_now:,.0f}', annotation_position='top right', annotation_font=dict(size=10,color='gray'))
+    for level in [8000, 7000]:
+        fig.add_vline(x=level, line_dash='dash', line_color='#e65100', opacity=0.3,
+            annotation_text=f'{level:,}', annotation_position='bottom left', annotation_font=dict(size=9,color='#e65100'))
+    fig.update_layout(template='plotly_white', height=360, xaxis_title='PSI20点位',
+        yaxis_title='基金市值 (EUR)', yaxis_tickformat=',',
+        legend=dict(x=0.01,y=0.01,bgcolor='rgba(255,255,255,0.9)'),
+        margin=dict(t=10,b=50,l=80,r=20), hovermode='x unified')
+    return fig.to_json()
+
 # ─── HTML ─────────────────────────────
 def generate_html(fund_df, psi_df, res, live):
     df, events, strats, rec, options = res['df'], res['events'], res['strats'], res['rec'], res['options']
     psi_scenarios = res['psi_scenarios']
+    psi_scenarios_b = res['psi_scenarios_b']
     K_90 = res['K_90']
     rec_prem = res['rec_prem']
+    planb_prem = res['planb_prem']
+    avg_crash_ratio = res['avg_crash_ratio']
+    crash_ratios = res['crash_ratios']
     K = rec['K']
     fv = live['fund_value']
     fund_nav = live['fund_nav']
@@ -383,11 +446,15 @@ def generate_html(fund_df, psi_df, res, live):
     for i, ev in enumerate(events):
         act = ' active' if i==0 else ''
         hold = '' if ev['in_hold'] else ' <span style="font-size:10px;color:#aaa">(买入前)</span>'
+        cr = ev.get('crash_ratio')
+        cr_str = f'{cr:.3f}' if cr else '-'
+        cr_color = '#c62828' if cr and cr > BETA_FUND_IBEX else '#2e7d32'
         hist_rows += f"""<tr style="background:#f0fff0;cursor:pointer" onclick="showTab({i})">
           <td>{i+1}</td><td>{ev['start_str']}~{ev['end_str']}{hold}</td>
           <td style="color:#c62828;font-weight:600">{ev['fund_chg']:.1f}%</td>
           <td style="color:#2e7d32;font-weight:600">{ev['ibex_chg']:+.1f}%</td>
-          <td>{ev['ibex_peak']:,.0f}&rarr;{ev['ibex_level']:,.0f}</td></tr>"""
+          <td>{ev['ibex_peak']:,.0f}&rarr;{ev['ibex_level']:,.0f}</td>
+          <td style="color:{cr_color};font-weight:600">{cr_str}</td></tr>"""
 
         tab_btns += f'<button class="tab-btn{act}" onclick="showTab({i})">#{i+1} {ev["end_str"][5:]}</button>'
 
@@ -445,7 +512,7 @@ def generate_html(fund_df, psi_df, res, live):
         tg = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_r else ''
         cost_rows += f'<tr{st}><td style="text-align:left">{lab}{tg}</td><td>{freq}x/年</td><td>&euro;{ae:,.0f} ({ae/fv*100:.2f}%)</td><td>&euro;{fy:,.0f} ({fy/fv*100:.1f}%)</td></tr>'
 
-    # PSI20 scenario rows for section 六
+    # PSI20 scenario rows for section 六 Plan A
     psi_rows = ''
     for sc in psi_scenarios:
         cc = '#2e7d32' if sc['cov']>=80 else ('#e65100' if sc['cov']>=40 else '#c62828')
@@ -458,6 +525,23 @@ def generate_html(fund_df, psi_df, res, live):
           <td style="font-weight:700">&euro;{sc['net']:,}</td>
           <td style="color:{cc};font-weight:700">{sc['cov']}%</td>
         </tr>'''
+
+    # PSI20 scenario rows for section 六 Plan B
+    psi_rows_b = ''
+    for sc in psi_scenarios_b:
+        cc = '#2e7d32' if sc['cov']>=80 else ('#e65100' if sc['cov']>=40 else '#c62828')
+        psi_drop = (sc['psi'] - psi_now) / psi_now * 100
+        psi_rows_b += f'''<tr>
+          <td style="font-weight:700">{sc['psi']:,} <span style="font-size:10px;color:#888">({psi_drop:+.0f}%)</span></td>
+          <td>&euro;{sc['fund_est']:,}</td>
+          <td style="color:#c62828;font-weight:600">-&euro;{sc['fund_loss']:,}</td>
+          <td style="color:#2e7d32;font-weight:600">+&euro;{sc['put_pay']:,}</td>
+          <td style="font-weight:700">&euro;{sc['net']:,}</td>
+          <td style="color:{cc};font-weight:700">{sc['cov']}%</td>
+        </tr>'''
+
+    # Plan B payoff chart
+    planb_chart = chart_payoff_planb(rec, live)
 
     html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>葡萄牙基金对冲方案</title>
@@ -511,7 +595,30 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 .data-bar{{background:white;border-radius:10px;padding:12px 16px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.07);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:13px}}
 .data-bar .src{{color:#888}}.data-bar .src b{{color:#1a237e}}
 .data-bar .timer{{color:#e65100;font-weight:600}}
-</style></head><body><div class="page">
+.plan-nav{{position:sticky;top:0;z-index:100;background:rgba(244,246,251,0.95);backdrop-filter:blur(8px);padding:10px 0;margin-bottom:16px;border-bottom:2px solid #e0e0e0}}
+.plan-nav .inner{{max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:0 20px}}
+.plan-nav .label{{font-size:13px;color:#888;font-weight:600}}
+.plan-btn{{padding:10px 24px;border:2px solid #ccc;border-radius:10px;cursor:pointer;font-size:14px;font-weight:700;background:white;transition:all .2s;line-height:1.3}}
+.plan-btn:hover{{border-color:#1a237e;background:#f5f5ff}}
+.plan-btn.active-a{{border-color:#2e7d32;background:#e8f5e9;color:#1b5e20}}
+.plan-btn.active-b{{border-color:#e65100;background:#fff3e0;color:#e65100}}
+.plan-panel-a,.plan-panel-b{{display:none}}
+.plan-panel-a.show,.plan-panel-b.show{{display:block}}
+</style></head><body>
+
+<div class="plan-nav">
+  <div class="inner">
+    <span class="label">方案切换：</span>
+    <button class="plan-btn active-a" id="btn-a" onclick="switchPlan('a')">
+      A: 混合 ATM+OTM<br><span style="font-size:11px;font-weight:400">小跌+大跌都保护</span>
+    </button>
+    <button class="plan-btn" id="btn-b" onclick="switchPlan('b')">
+      B: 纯OTM 省钱版<br><span style="font-size:11px;font-weight:400">只防崩盘，成本低40%</span>
+    </button>
+  </div>
+</div>
+
+<div class="page">
 
 <h1>葡萄牙基金对冲方案</h1>
 <p class="meta">Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007)</p>
@@ -558,13 +665,15 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <p class="note-sm">图中绿色编号标记对应下表中的10次急跌事件。点击表格行查看放大详情。</p>
 
 <table>
-  <tr><th>#</th><th>时期</th><th>基金1周跌</th><th>IBEX&plusmn;2周跌</th><th>IBEX点位变化</th></tr>
+  <tr><th>#</th><th>时期</th><th>基金1周跌</th><th>IBEX&plusmn;2周跌</th><th>IBEX点位变化</th><th>急跌比率<br><span style="font-weight:400;font-size:9px">基金跌/IBEX跌</span></th></tr>
   {hist_rows}
 </table>
 
 <div class="alert a-good">
   <b>{nt}次急跌（1周跌>3%），IBEX在&plusmn;2周内全部同步下跌，0次脱钩。</b><br>
-  IBEX平均跌幅{np.mean([e['ibex_chg'] for e in events]):.1f}%，比基金平均跌幅{np.mean([e['fund_chg'] for e in events]):.1f}%更大。
+  IBEX平均跌幅{np.mean([e['ibex_chg'] for e in events]):.1f}%，比基金平均跌幅{np.mean([e['fund_chg'] for e in events]):.1f}%更大。<br>
+  <span style="font-size:13px">急跌比率（基金跌幅/IBEX跌幅）平均<b>{avg_crash_ratio:.3f}</b>，范围{min(crash_ratios):.3f}~{max(crash_ratios):.3f}。
+  高于全样本Beta={BETA_FUND_IBEX}，说明<b>急跌时基金对IBEX的敏感度比平时更高</b>（条件Beta效应）。</span>
 </div>
 
 <p style="margin-bottom:8px"><b>点击查看每次事件的放大走势：</b></p>
@@ -594,6 +703,17 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   &middot; Beta(基金/IBEX) = {BETA_FUND_IBEX}（R&sup2;=42%，IBEX只能解释基金42%的波动）<br>
   &middot; Beta(IBEX/PSI20) = {BETA_IBEX_PSI}（用于PSI20场景→IBEX点位换算）<br>
   <span style="font-size:12px;color:#888">注：R&sup2;=42%意味着基金有58%的波动无法被IBEX解释。Put只对冲IBEX相关的那42%风险。</span>
+</div>
+<div class="alert a-info">
+  <b>条件Beta（急跌时）</b>：上面的Beta={BETA_FUND_IBEX}是全样本（含平时+急跌）的平均值。
+  但实证显示，在{len(crash_ratios)}次急跌事件中，基金跌幅/IBEX跌幅的平均比率为<b>{avg_crash_ratio}</b>，
+  比全样本Beta高<b>{round((avg_crash_ratio/BETA_FUND_IBEX-1)*100)}%</b>。<br>
+  这意味着：急跌时基金对IBEX的真实敏感度更高。按Beta={BETA_FUND_IBEX}计算的16张合约，
+  在急跌时实际只能覆盖约<b>{round(BETA_FUND_IBEX/avg_crash_ratio*100)}%</b>的IBEX相关损失，而非理论上的100%。<br>
+  <span style="font-size:12px;color:#888">
+  学术背景：危机中跨市场相关性上升是公认现象（Longin &amp; Solnik 2001）。条件Beta &gt; 无条件Beta是正常的。
+  但10次样本量偏小（比率范围{min(crash_ratios):.3f}~{max(crash_ratios):.3f}），不宜过度精确化。
+  本报告仍以全样本Beta定合约数，但提醒用户实际覆盖率可能低于理论值。</span>
 </div>
 </div>
 
@@ -631,8 +751,10 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 </div>
 
+<!-- ===== Plan A: 六 ===== -->
+<div class="plan-panel-a show">
 <div class="section">
-<h2>六、推荐方案</h2>
+<h2>六、推荐方案 A：混合行权价</h2>
 <div class="rec">
   <h3>ATM Put &times;8 + 90%OTM Put &times;20，12个月年滚 + 动态滚仓</h3>
   <div class="rec-grid">
@@ -663,9 +785,46 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 <div class="chart-box"><div id="c5" style="height:360px"></div></div>
 </div>
+</div>
 
+<!-- ===== Plan B: 六 ===== -->
+<div class="plan-panel-b">
 <div class="section">
-<h2>七、操作步骤</h2>
+<h2>六、推荐方案 B：纯OTM省钱版</h2>
+<div class="rec" style="border-color:#e65100;background:#fff3e0">
+  <h3 style="color:#e65100">纯90%OTM Put &times;24，12个月年滚 + 动态滚仓</h3>
+  <div class="rec-grid">
+    <div class="rec-item"><div class="rl">OTM行权价</div><div class="rv" style="color:#e65100">{K_90:,}点</div><div style="font-size:10px;color:#888">&times;24张（90% OTM）</div></div>
+    <div class="rec-item"><div class="rl">每年保费</div><div class="rv" style="color:#e65100">&euro;{planb_prem:,}</div><div style="font-size:10px;color:#888">BS理论值，{planb_prem/fv*100:.2f}%</div></div>
+    <div class="rec-item"><div class="rl">5年总保费</div><div class="rv" style="color:#e65100">&euro;{planb_prem*5:,}</div></div>
+    <div class="rec-item"><div class="rl">vs 方案A</div><div class="rv" style="color:#e65100">省{round((1-planb_prem/rec_prem)*100)}%保费</div></div>
+    <div class="rec-item"><div class="rl">代价</div><div class="rv" style="color:#c62828;font-size:16px">10%以内跌幅不赔</div></div>
+  </div>
+</div>
+<div class="alert a-warn" style="font-size:13px">
+  <b>方案B的逻辑</b>：如果你认为小幅回调（5-10%）可以承受，只想防范崩盘式暴跌（>10%），
+  那么全部买便宜的虚值Put，省下来的保费本身就是一种保护（少花钱=少损失确定成本）。<br>
+  <b>适合</b>：风险承受力较高、不想每年花太多保费的投资者。<br>
+  <b>不适合</b>：希望任何级别下跌都有赔付的投资者（请选方案A）。
+</div>
+
+<p style="margin:16px 0 8px;font-weight:700">如果PSI20跌到…你的基金会怎样？（方案B）</p>
+<table>
+  <tr><th>PSI20跌到</th><th>基金预估市值</th><th>预估亏损</th><th>Put赔付</th><th>对冲后市值</th><th>覆盖率</th></tr>
+  {psi_rows_b}
+</table>
+<div class="alert a-info" style="font-size:13px">
+  注意：当PSI20只跌5-8%时，IBEX估计跌幅不足10%，OTM Put尚未进入实值区，赔付为零。
+  只有PSI20跌到较低水平（约7500以下），Put才开始大额赔付。
+</div>
+<div class="chart-box"><div id="c5b" style="height:360px"></div></div>
+</div>
+</div>
+
+<!-- ===== Plan A: 七 ===== -->
+<div class="plan-panel-a show">
+<div class="section">
+<h2>七、操作步骤（方案A）</h2>
 <div class="steps"><ol>
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
   <li><b>买第一腿——ATM Put &times;8</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>（ATM，50点间距）。参考价约&euro;{rec['price']:,.0f}/张，8张合计约&euro;{round(rec['price']*8):,}。</li>
@@ -680,6 +839,26 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   避免保护失效。预计每年触发0-2次额外滚仓。
 </div>
 </div>
+</div>
+
+<!-- ===== Plan B: 七 ===== -->
+<div class="plan-panel-b">
+<div class="section">
+<h2>七、操作步骤（方案B）</h2>
+<div class="steps"><ol>
+  <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
+  <li><b>买90%OTM Put &times;24</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{K_90:,}</b>（90% OTM，50点间距）。参考价约&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/张，24张合计约&euro;{planb_prem:,}。</li>
+  <li><b>总保费</b>约&euro;{planb_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%），实际市价可能上浮10-30%。</li>
+  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超15%（>{round(ibex_now*1.15):,}）时必须提前滚仓</b>——
+  卖掉旧Put（已变深度虚值），买入新的OTM Put重设行权价。</li>
+  <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
+</ol></div>
+<div class="alert a-warn" style="font-size:13px">
+  <b>方案B注意</b>：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。
+  如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。
+</div>
+</div>
+</div>
 
 <div class="section">
 <h2>八、局限性（必读）</h2>
@@ -692,8 +871,11 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
     <li><b>这是减震垫，不是全额保险</b>：在理想线性假设下覆盖约46%的基金损失。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。</li>
-    <li><b>保费是确定支出</b>：每年&euro;{rec_prem:,}，5年不出事白花&euro;{rec_prem*5:,}（组合的{rec_prem*5/fv*100:.1f}%）。</li>
+    <li><b>保费是确定支出</b>：每年&euro;{rec_prem:,}（方案A），5年不出事白花&euro;{rec_prem*5:,}（组合的{rec_prem*5/fv*100:.1f}%）。</li>
     <li><b>R&sup2;=42%的根本限制</b>：IBEX只能解释基金42%的波动。基金可能因为葡萄牙本地原因（个股暴雷、流动性危机）大跌而IBEX无动于衷，此时Put完全无效。</li>
+    <li><b>条件Beta高于无条件Beta</b>：全样本Beta={BETA_FUND_IBEX}用于计算合约数，但{len(crash_ratios)}次历史急跌中实际比率平均{avg_crash_ratio}（高{round((avg_crash_ratio/BETA_FUND_IBEX-1)*100)}%）。
+    这意味着16张合约在急跌时只能覆盖约{round(BETA_FUND_IBEX/avg_crash_ratio*100)}%的IBEX相关损失，
+    实际保护效果比场景表显示的更弱。样本量仅{len(crash_ratios)}次，比率波动大（{min(crash_ratios):.2f}~{max(crash_ratios):.2f}），结论存在不确定性。</li>
     <li><b>线性模型在极端行情下失真</b>：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。</li>
     <li><b>IV影响成本</b>：恐慌期Put更贵，尽量在平静期滚仓。</li>
   </ol>
@@ -702,12 +884,23 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 
 <div class="section">
 <h2>九、总结</h2>
+<div class="plan-panel-a show">
 <div class="alert a-note" style="font-size:14px;line-height:1.9">
-  <b style="font-size:17px;color:#4a148c">ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓</b><br>
+  <b style="font-size:17px;color:#4a148c">方案A：ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓</b><br>
   <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。混合配置在大跌时赔付比纯ATM多33-60%，同时保留小跌基本保护。<br>
   <b>做不到的</b>：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。<br>
   <b>成本</b>：年化{rec_prem/fv*100:.2f}%（&euro;{rec_prem:,}/年），5年约&euro;{rec_prem*5:,}，是确定的支出。<br>
   <b>本质</b>：这是一个减震垫，不是全额保险。它降低了系统性暴跌中的最大亏损幅度，但不能保证你不亏钱。
+</div>
+</div>
+<div class="plan-panel-b">
+<div class="alert a-note" style="font-size:14px;line-height:1.9;border-color:#e65100;background:#fff3e0">
+  <b style="font-size:17px;color:#e65100">方案B：纯90%OTM &times;24，12个月年滚 + 动态滚仓</b><br>
+  <b>能做到的</b>：在崩盘式暴跌（>10%）时提供赔付，成本比方案A低{round((1-planb_prem/rec_prem)*100)}%。<br>
+  <b>做不到的</b>：5-10%的中等回调完全没有保护。同样无法覆盖IBEX以外58%的风险。<br>
+  <b>成本</b>：年化{planb_prem/fv*100:.2f}%（&euro;{planb_prem:,}/年），5年约&euro;{planb_prem*5:,}。<br>
+  <b>适合</b>：能承受中等回调、只想防黑天鹅的投资者。省下的保费本身也是一种保护。
+</div>
 </div>
 </div>
 
@@ -716,6 +909,21 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 Plotly.newPlot('c1',__C1__.data,__C1__.layout,{{responsive:true}});
 Plotly.newPlot('c2',__C2__.data,__C2__.layout,{{responsive:true}});
 Plotly.newPlot('c5',__C5__.data,__C5__.layout,{{responsive:true}});
+var c5bData=__C5B__;
+function switchPlan(p){{
+  var a=document.querySelectorAll('.plan-panel-a'),b=document.querySelectorAll('.plan-panel-b');
+  var btnA=document.getElementById('btn-a'),btnB=document.getElementById('btn-b');
+  if(p==='a'){{
+    a.forEach(function(el){{el.classList.add('show')}});b.forEach(function(el){{el.classList.remove('show')}});
+    btnA.className='plan-btn active-a';btnB.className='plan-btn';
+  }}else{{
+    b.forEach(function(el){{el.classList.add('show')}});a.forEach(function(el){{el.classList.remove('show')}});
+    btnB.className='plan-btn active-b';btnA.className='plan-btn';
+    var e5b=document.getElementById('c5b');
+    if(e5b&&!e5b.dataset.r){{Plotly.newPlot('c5b',c5bData.data,c5bData.layout,{{responsive:true}});e5b.dataset.r='1'}}
+  }}
+  window.scrollTo({{top:document.querySelector('.plan-panel-'+(p==='a'?'a':'b')+'.show').offsetTop-80,behavior:'smooth'}});
+}}
 var Z=__ZOOM__;
 function showTab(i){{
   document.querySelectorAll('.tab-btn').forEach((b,j)=>b.classList.toggle('active',j===i));
@@ -745,7 +953,7 @@ if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});doc
 }})();
 </script></body></html>"""
 
-    html = html.replace('__C1__',c1).replace('__C2__',c2).replace('__C5__',c5)
+    html = html.replace('__C5B__',planb_chart).replace('__C1__',c1).replace('__C2__',c2).replace('__C5__',c5)
     html = html.replace('__ZOOM__', '['+','.join(c if c else 'null' for c in zooms)+']')
     return html
 
