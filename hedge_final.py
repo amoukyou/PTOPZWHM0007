@@ -754,7 +754,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="alert a-warn" style="font-size:13px">
   <b>怎么读这张表</b>：<br>
   &middot; <b>纯ATM ×16</b>：所有跌幅都有赔付，但大跌时赔付最少（因为只有16张）<br>
-  &middot; <b>ATM ×8 + 90%OTM ×20 [推荐]</b>：小跌仍有保护（8张ATM兜底），大跌赔付比纯ATM多33-60%<br>
+  &middot; <b>ATM ×8 + 90%OTM ×20 [推荐]</b>：小跌仍有保护（8张ATM兜底），同预算但合约更多，大跌时赔付更高<br>
   &middot; <b>纯90%OTM ×24</b>：最省钱，但10%以内的跌幅完全不赔<br>
   OTM行权价={K_90:,}点（IBEX当前90%），ATM行权价={K:,}点
 </div>
@@ -786,13 +786,13 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
     <div class="rec-item"><div class="rl">OTM行权价</div><div class="rv">{K_90:,}点</div><div style="font-size:10px;color:#888">&times;20张（90% OTM）</div></div>
     <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec_prem:,}</div><div style="font-size:10px;color:#888">BS理论值，{rec_prem/fv*100:.2f}%</div></div>
     <div class="rec-item"><div class="rl">5年总保费</div><div class="rv">&euro;{rec_prem*5:,}</div></div>
-    <div class="rec-item"><div class="rl">vs 纯ATM</div><div class="rv">同成本，大跌多赔33-60%</div></div>
+    <div class="rec-item"><div class="rl">vs 纯ATM×16</div><div class="rv">同预算，合约更多</div></div>
   </div>
 </div>
 <div class="alert a-info" style="font-size:13px">
-  <b>为什么混合配置更好</b>：同样~&euro;{rec_prem:,}/年预算，8张ATM保住小跌时的基本保护，
-  20张90%OTM在大跌时提供额外杠杆（单价仅ATM的40%，但张数多1.5倍）。
-  IBEX跌30%时赔付比纯ATM多<b>{round((options[1]['scenarios'][30]['payoff']/options[0]['scenarios'][30]['payoff']-1)*100)}%</b>。
+  <b>为什么混合配置</b>：同样~&euro;{rec_prem:,}/年预算，8张ATM保住小跌时的基本保护，
+  20张90%OTM在大跌时提供额外赔付（OTM单价仅ATM的40%，同预算可买更多张数）。
+  对比见上表第四列"IBEX跌30%"，混合配置赔付&euro;{options[1]['scenarios'][30]['payoff']:,} vs 纯ATM &euro;{options[0]['scenarios'][30]['payoff']:,}。
 </div>
 
 <p style="margin:16px 0 8px;font-weight:700">如果PSI20跌到…你的基金会怎样？</p>
@@ -962,7 +962,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="plan-panel-a show">
 <div class="alert a-note" style="font-size:14px;line-height:1.9">
   <b style="font-size:17px;color:#4a148c">方案A：ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓</b><br>
-  <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。混合配置在大跌时赔付比纯ATM多33-60%，同时保留小跌基本保护。<br>
+  <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。混合配置用同样预算换更多合约，大跌时赔付高于纯ATM×16，同时8张ATM保留小跌保护。<br>
   <b>做不到的</b>：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。<br>
   <b>成本</b>：年化{rec_prem/fv*100:.2f}%（&euro;{rec_prem:,}/年），5年约&euro;{rec_prem*5:,}，是确定的支出。<br>
   <b>本质</b>：这是一个减震垫，不是全额保险。它降低了系统性暴跌中的最大亏损幅度，但不能保证你不亏钱。
