@@ -98,10 +98,10 @@ def load_data(live=None):
     psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
     psi['Date'] = psi['Date'].dt.normalize()
     # 追加live数据到fund_df，确保事件检测覆盖最新交易日
-    if live and 'fund' in live and 'fund_date' in live:
+    if live and 'fund_nav' in live and 'fund_date' in live:
         live_dt = pd.Timestamp(live['fund_date'])
         if fund['Date'].iloc[-1] < live_dt:
-            live_row = pd.DataFrame({'Date': [live_dt], 'Close': [live['fund']]})
+            live_row = pd.DataFrame({'Date': [live_dt], 'Close': [live['fund_nav']]})
             # 补齐CSV中可能有的其他列
             for col in fund.columns:
                 if col not in live_row.columns:
