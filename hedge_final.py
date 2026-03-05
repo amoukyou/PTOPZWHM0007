@@ -1,7 +1,7 @@
 """
-葡萄牙基金对冲方案 — 完整报告 v8
-- 删除远期Put段落(已无意义)
-- 新增"买多少张合约"对比(16/24/38张,含场景覆盖率)
+葡萄牙基金对冲方案 — 完整报告 v9
+- 持仓概况实时更新(基金NAV/PSI20/IBEX/ESTOXX50从yfinance获取)
+- 推荐方案用PSI20点位+基金市值展示，不再用IBEX点位
 """
 
 import os, sys, math
@@ -13,21 +13,34 @@ import plotly.graph_objects as go
 sys.stdout.reconfigure(encoding='utf-8')
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ═══ 核心参数 ══════════════════════════════════
-FUND_VALUE       = 651_000
+# ═══ 固定参数 ══════════════════════════════════
 INITIAL_INV      = 507_000
 FUND_ENTRY_PRICE = 13.3534
 FUND_UNITS       = round(INITIAL_INV / FUND_ENTRY_PRICE)
-FUND_CURR_PRICE  = round(FUND_VALUE / FUND_UNITS, 4)
-PSI20_CURRENT    = 8_862
 PSI20_ENTRY_ACT  = 6_711
-IBEX_CURRENT     = 17_062
 BETA_FUND_IBEX   = 0.4230
+BETA_FUND_PSI    = 0.6271
+BETA_IBEX_PSI    = 0.6897
 IBEX_IMPLIED_VOL = 0.185
 ECB_RATE         = 0.026
 N_CONTRACTS      = 16          # Mini IBEX, 乘数 €1/点
 ENTRY_DATE       = '2024-07-16'
 # ═══════════════════════════════════════════════
+
+def fetch_live_prices():
+    """获取基金NAV和三大指数最新收盘价"""
+    tickers = {'fund': '0P0001O8MU.F', 'psi': 'PSI20.LS', 'ibex': '^IBEX', 'estx': '^STOXX50E'}
+    prices = {}
+    for key, sym in tickers.items():
+        try:
+            t = yf.Ticker(sym)
+            h = t.history(period='5d')
+            if len(h) > 0:
+                prices[key] = float(h['Close'].iloc[-1])
+                prices[key+'_date'] = h.index[-1].strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    return prices
 
 def norm_cdf(x):
     return (1 + math.erf(x / math.sqrt(2))) / 2
@@ -102,7 +115,11 @@ def get_put_mtm(positions, ibex_val, day_idx):
             return bs_put(ibex_val, pos['strike'], rem) * N_CONTRACTS, pos['strike']
     return 0, 0
 
-def analyze(fund_df, ibex_df, psi_df):
+def analyze(fund_df, ibex_df, psi_df, live):
+    fv = live['fund_value']
+    ibex_now = live['ibex']
+    psi_now = live['psi']
+
     df = pd.merge(fund_df[['Date','Close']].rename(columns={'Close':'fund'}),
                   ibex_df, on='Date', how='inner').sort_values('Date').reset_index(drop=True)
     events = find_weekly_drops(df)
@@ -114,34 +131,47 @@ def analyze(fund_df, ibex_df, psi_df):
     for ev in events:
         ev['strat'] = {}
         if not ev['in_hold']: continue
-        loss = abs(FUND_VALUE * ev['fund_chg'] / 100)
+        loss = abs(fv * ev['fund_chg'] / 100)
         ev['fund_loss'] = loss
         idx = (df_h['ibex'] - ev['ibex_level']).abs().idxmin()
         for k, s in strats.items():
             mtm, strike = get_put_mtm(s['positions'], ev['ibex_level'], idx)
             ev['strat'][k] = dict(mtm=mtm, strike=strike, cov=mtm/loss*100 if loss>0 else 0)
     # Recommendation (base: 16 contracts)
-    K = round(IBEX_CURRENT); p1 = bs_put(IBEX_CURRENT, K, 1.0)
-    rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/FUND_VALUE*100,2))
+    K = round(ibex_now); p1 = bs_put(ibex_now, K, 1.0)
+    rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/fv*100,2))
     # Contract count options for comparison
     options = []
     for n, label, desc in [
-        (16, '16张 (Beta调整)', f'覆盖Beta敞口€{round(FUND_VALUE*BETA_FUND_IBEX):,}'),
+        (16, '16张 (Beta调整)', f'覆盖Beta敞口€{round(fv*BETA_FUND_IBEX):,}'),
         (24, '24张 (1.5×Beta)', '在Beta基础上加50%安全垫'),
-        (38, '38张 (全额名义)', f'覆盖基金全额€{FUND_VALUE:,}'),
+        (38, '38张 (全额名义)', f'覆盖基金全额€{fv:,}'),
     ]:
         prem = round(p1 * n)
-        # Payoff at different IBEX drop levels
         scenarios = {}
         for drop_pct in [10, 15, 20, 30]:
-            ibex_drop = round(IBEX_CURRENT * (1 - drop_pct/100))
+            ibex_drop = round(ibex_now * (1 - drop_pct/100))
             put_payoff = max(K - ibex_drop, 0) * n
-            fund_loss = abs(FUND_VALUE * BETA_FUND_IBEX * drop_pct / 100)
+            fund_loss = abs(fv * BETA_FUND_IBEX * drop_pct / 100)
             cov = put_payoff / fund_loss * 100 if fund_loss > 0 else 0
             scenarios[drop_pct] = dict(payoff=put_payoff, fund_loss=round(fund_loss), cov=round(cov))
         options.append(dict(n=n, label=label, desc=desc, prem=prem,
-                            annual_pct=round(prem/FUND_VALUE*100, 2), five_yr=prem*5, scenarios=scenarios))
-    return dict(df=df, df_h=df_h, events=events, strats=strats, rec=rec, options=options)
+                            annual_pct=round(prem/fv*100, 2), five_yr=prem*5, scenarios=scenarios))
+    # PSI20 scenario table for section 六
+    psi_scenarios = []
+    for psi_target in [8000, 7500, 7000, 6000]:
+        psi_drop_pct = (psi_target - psi_now) / psi_now  # negative
+        ibex_est = ibex_now * (1 + BETA_IBEX_PSI * psi_drop_pct)
+        fund_est = fv * (1 + BETA_FUND_PSI * psi_drop_pct)
+        fund_loss = fv - fund_est
+        put_pay = max(K - ibex_est, 0) * N_CONTRACTS
+        net = fund_est + put_pay - rec['total']  # fund value + put payoff - premium
+        psi_scenarios.append(dict(
+            psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
+            put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
+            cov=round(put_pay/fund_loss*100) if fund_loss > 0 else 0))
+    return dict(df=df, df_h=df_h, events=events, strats=strats, rec=rec,
+                options=options, psi_scenarios=psi_scenarios)
 
 # ─── Charts ──────────────────────────────
 def chart_fund_psi(fund_df, psi_df):
@@ -173,7 +203,7 @@ def chart_fund_ibex(df, events):
         legend=dict(x=0.01,y=0.99), margin=dict(t=10,b=30,l=60,r=20), hovermode='x unified')
     return fig.to_json()
 
-def make_zoom_charts(df, events, strats):
+def make_zoom_charts(df, events, strats, fv):
     """为每个事件生成±20天放大图"""
     charts = []
     df_h = df[df['Date'] >= ENTRY_DATE].reset_index(drop=True)
@@ -198,7 +228,7 @@ def make_zoom_charts(df, events, strats):
             pv = []
             for t in range(lo, hi+1):
                 mtm, _ = get_put_mtm(s12['positions'], df_h['ibex'].iloc[t], t)
-                pv.append((df_h['fund'].iloc[t]/rf-1)*100 + mtm/FUND_VALUE*100)
+                pv.append((df_h['fund'].iloc[t]/rf-1)*100 + mtm/fv*100)
             fig.add_trace(go.Scatter(x=w['Date'],y=pv,name='基金+Put',
                 line=dict(color='#2e7d32',width=3),hovertemplate='%{x|%m-%d} 组合:%{y:+.1f}%<extra></extra>'))
         fig.add_hline(y=0,line_dash='dot',line_color='gray',opacity=0.3)
@@ -208,31 +238,52 @@ def make_zoom_charts(df, events, strats):
         charts.append(fig.to_json())
     return charts
 
-def chart_payoff(rec):
-    x = np.linspace(10000,20000,500)
-    fp = FUND_VALUE * BETA_FUND_IBEX * (x - IBEX_CURRENT) / IBEX_CURRENT
-    pp = np.maximum(rec['K']-x,0)*N_CONTRACTS - rec['total']
+def chart_payoff(rec, live):
+    """损益图：x轴=PSI20点位, y轴=基金市值(EUR)"""
+    fv, psi_now, ibex_now = live['fund_value'], live['psi'], live['ibex']
+    psi_x = np.linspace(5000, 11000, 500)
+    psi_ret = (psi_x - psi_now) / psi_now
+    ibex_est = ibex_now * (1 + BETA_IBEX_PSI * psi_ret)
+    fund_val = fv * (1 + BETA_FUND_PSI * psi_ret)
+    put_pay = np.maximum(rec['K'] - ibex_est, 0) * N_CONTRACTS
+    hedged = fund_val + put_pay - rec['total']
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=x,y=fp,name='基金损益(不对冲)',line=dict(color='#c62828',width=2.5,dash='dot')))
-    fig.add_trace(go.Scatter(x=x,y=fp+pp,name='基金+Put(对冲后)',line=dict(color='#2e7d32',width=3)))
-    fig.add_vline(x=IBEX_CURRENT,line_dash='dot',line_color='gray',opacity=0.4,
-        annotation_text=f'当前{IBEX_CURRENT:,}',annotation_position='top left',annotation_font=dict(size=10,color='gray'))
-    fig.add_vline(x=rec['K'],line_dash='dash',line_color='#2e7d32',opacity=0.5,
-        annotation_text=f'行权价{rec["K"]:,}',annotation_position='bottom left',annotation_font=dict(size=10,color='#2e7d32'))
-    fig.add_hline(y=0,line_dash='dot',line_color='gray',opacity=0.3)
-    fig.update_layout(template='plotly_white',height=340,xaxis_title='12个月后IBEX35点位',yaxis_title='损益(EUR)',
-        legend=dict(x=0.01,y=0.01,bgcolor='rgba(255,255,255,0.9)'),margin=dict(t=10,b=50,l=70,r=20),hovermode='x unified')
+    fig.add_trace(go.Scatter(x=psi_x, y=fund_val, name='基金市值(不对冲)',
+        line=dict(color='#c62828',width=2.5,dash='dot'),
+        hovertemplate='PSI20:%{x:,.0f}<br>基金:€%{y:,.0f}<extra></extra>'))
+    fig.add_trace(go.Scatter(x=psi_x, y=hedged, name='基金+Put(对冲后)',
+        line=dict(color='#2e7d32',width=3),
+        hovertemplate='PSI20:%{x:,.0f}<br>对冲后:€%{y:,.0f}<extra></extra>'))
+    fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
+        annotation_text=f'当前€{fv:,}', annotation_position='top left', annotation_font=dict(size=10,color='gray'))
+    fig.add_vline(x=psi_now, line_dash='dot', line_color='gray', opacity=0.4,
+        annotation_text=f'当前PSI20 {psi_now:,.0f}', annotation_position='top right', annotation_font=dict(size=10,color='gray'))
+    for level in [8000, 7000]:
+        fig.add_vline(x=level, line_dash='dash', line_color='#e65100', opacity=0.3,
+            annotation_text=f'{level:,}', annotation_position='bottom left', annotation_font=dict(size=9,color='#e65100'))
+    fig.update_layout(template='plotly_white', height=360, xaxis_title='PSI20点位',
+        yaxis_title='基金市值 (EUR)', yaxis_tickformat=',',
+        legend=dict(x=0.01,y=0.01,bgcolor='rgba(255,255,255,0.9)'),
+        margin=dict(t=10,b=50,l=80,r=20), hovermode='x unified')
     return fig.to_json()
 
 # ─── HTML ─────────────────────────────
-def generate_html(fund_df, psi_df, res):
+def generate_html(fund_df, psi_df, res, live):
     df, events, strats, rec, options = res['df'], res['events'], res['strats'], res['rec'], res['options']
+    psi_scenarios = res['psi_scenarios']
+    fv = live['fund_value']
+    fund_nav = live['fund_nav']
+    psi_now = live['psi']
+    ibex_now = live['ibex']
+    estx_now = live['estx']
+    data_date = live.get('data_date', '?')
+
     c1 = chart_fund_psi(fund_df, psi_df)
     c2 = chart_fund_ibex(df, events)
-    c5 = chart_payoff(rec)
-    zooms = make_zoom_charts(df, events, strats)
+    c5 = chart_payoff(rec, live)
+    zooms = make_zoom_charts(df, events, strats, fv)
 
-    fg = (FUND_CURR_PRICE / FUND_ENTRY_PRICE - 1) * 100
+    fg = (fund_nav / FUND_ENTRY_PRICE - 1) * 100
     nt = len(events)
     ns = sum(1 for e in events if e['sync'])
 
@@ -249,7 +300,7 @@ def generate_html(fund_df, psi_df, res):
 
         tab_btns += f'<button class="tab-btn{act}" onclick="showTab({i})">#{i+1} {ev["end_str"][5:]}</button>'
 
-        loss = ev.get('fund_loss', abs(FUND_VALUE*ev['fund_chg']/100))
+        loss = ev.get('fund_loss', abs(fv*ev['fund_chg']/100))
         detail = ''
         if ev['in_hold'] and ev['strat']:
             detail = '<table style="font-size:13px;margin-top:12px"><tr><th style="text-align:left">策略</th><th>行权价</th><th>Put赚了</th><th>净亏</th><th>覆盖率</th></tr>'
@@ -288,7 +339,7 @@ def generate_html(fund_df, psi_df, res):
         opt_rows += f'''<tr{st}>
           <td style="text-align:left">{opt['label']}{tag}<br><span style="font-size:10px;color:#888">{opt['desc']}</span></td>
           <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/年</span></td>
-          <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/FUND_VALUE*100:.1f}%</span></td>
+          <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/fv*100:.1f}%</span></td>
           <td style="color:{c10}">&euro;{s10['payoff']:,}<br><span style="font-size:10px">覆盖{s10['cov']}%</span></td>
           <td style="color:{c20}">&euro;{s20['payoff']:,}<br><span style="font-size:10px">覆盖{s20['cov']}%</span></td>
           <td style="color:{c30}">&euro;{s30['payoff']:,}<br><span style="font-size:10px">覆盖{s30['cov']}%</span></td>
@@ -298,12 +349,26 @@ def generate_html(fund_df, psi_df, res):
     cost_rows = ''
     for k, lab, freq in [('12M','12个月ATM 年滚',1),('6M','6个月ATM 半年滚',2),('3M','3个月ATM 季滚',4)]:
         s = strats[k]; T = s['months']/12
-        pe = bs_put(IBEX_CURRENT, IBEX_CURRENT, T)*N_CONTRACTS
+        pe = bs_put(ibex_now, ibex_now, T)*N_CONTRACTS
         ae = pe * (12/s['months']); fy = ae*5
         is_r = k=='12M'
         st = ' style="background:#f0fff0;font-weight:600"' if is_r else ''
         tg = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_r else ''
-        cost_rows += f'<tr{st}><td style="text-align:left">{lab}{tg}</td><td>{freq}x/年</td><td>&euro;{ae:,.0f} ({ae/FUND_VALUE*100:.2f}%)</td><td>&euro;{fy:,.0f} ({fy/FUND_VALUE*100:.1f}%)</td></tr>'
+        cost_rows += f'<tr{st}><td style="text-align:left">{lab}{tg}</td><td>{freq}x/年</td><td>&euro;{ae:,.0f} ({ae/fv*100:.2f}%)</td><td>&euro;{fy:,.0f} ({fy/fv*100:.1f}%)</td></tr>'
+
+    # PSI20 scenario rows for section 六
+    psi_rows = ''
+    for sc in psi_scenarios:
+        cc = '#2e7d32' if sc['cov']>=80 else ('#e65100' if sc['cov']>=40 else '#c62828')
+        psi_drop = (sc['psi'] - psi_now) / psi_now * 100
+        psi_rows += f'''<tr>
+          <td style="font-weight:700">{sc['psi']:,} <span style="font-size:10px;color:#888">({psi_drop:+.0f}%)</span></td>
+          <td>&euro;{sc['fund_est']:,}</td>
+          <td style="color:#c62828;font-weight:600">-&euro;{sc['fund_loss']:,}</td>
+          <td style="color:#2e7d32;font-weight:600">+&euro;{sc['put_pay']:,}</td>
+          <td style="font-weight:700">&euro;{sc['net']:,}</td>
+          <td style="color:{cc};font-weight:700">{sc['cov']}%</td>
+        </tr>'''
 
     html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>葡萄牙基金对冲方案</title>
@@ -357,15 +422,19 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </style></head><body><div class="page">
 
 <h1>葡萄牙基金对冲方案</h1>
-<p class="meta">Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007) &middot; 数据截至2026年3月</p>
+<p class="meta">Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007) &middot; 数据更新：{data_date}</p>
 
 <div class="section">
 <h2>一、持仓概况</h2>
 <div class="cards">
   <div class="card green"><div class="lbl">买入成本</div><div class="val">&euro;{INITIAL_INV:,}</div><div class="sub">2024.07 NAV &euro;{FUND_ENTRY_PRICE:.2f}</div></div>
-  <div class="card green"><div class="lbl">当前市值</div><div class="val">&euro;{FUND_VALUE:,}</div><div class="sub">NAV &euro;{FUND_CURR_PRICE:.2f}</div></div>
-  <div class="card purple"><div class="lbl">浮盈</div><div class="val">+&euro;{FUND_VALUE-INITIAL_INV:,}</div><div class="sub">+{fg:.1f}%</div></div>
-  <div class="card orange"><div class="lbl">PSI20</div><div class="val">{PSI20_CURRENT:,}</div><div class="sub">买入时{PSI20_ENTRY_ACT:,}</div></div>
+  <div class="card green"><div class="lbl">当前市值</div><div class="val">&euro;{fv:,}</div><div class="sub">NAV &euro;{fund_nav:.2f}</div></div>
+  <div class="card purple"><div class="lbl">浮盈</div><div class="val">{"+" if fv>=INITIAL_INV else ""}&euro;{fv-INITIAL_INV:,}</div><div class="sub">{fg:+.1f}%</div></div>
+  <div class="card orange"><div class="lbl">PSI20</div><div class="val">{psi_now:,.0f}</div><div class="sub">买入时{PSI20_ENTRY_ACT:,}</div></div>
+</div>
+<div style="display:flex;gap:10px;margin-bottom:12px;font-size:12px;color:#888">
+  <span>IBEX35: <b style="color:#e65100">{ibex_now:,.0f}</b></span>
+  <span>ESTOXX50: <b style="color:#6a1b9a">{estx_now:,.0f}</b></span>
 </div>
 <div class="chart-box"><div id="c1" style="height:300px"></div></div>
 <div class="alert a-warn">
@@ -406,7 +475,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 <div class="alert a-info">
   合约数量按Beta={BETA_FUND_IBEX}计算：基金对IBEX的敏感度为42%，
-  需要对冲的名义敞口=&euro;{FUND_VALUE:,}&times;{BETA_FUND_IBEX}=&euro;{round(FUND_VALUE*BETA_FUND_IBEX):,}，
+  需要对冲的名义敞口=&euro;{fv:,}&times;{BETA_FUND_IBEX}=&euro;{round(fv*BETA_FUND_IBEX):,}，
   除以IBEX点位=<b>{N_CONTRACTS}张Mini合约</b>（乘数&euro;1/点）。
 </div>
 </div>
@@ -444,16 +513,21 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="rec">
   <h3>{N_CONTRACTS}张 Mini IBEX35 12个月ATM Put，每年滚仓</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">行权价</div><div class="rv">{rec['K']:,}点</div></div>
+    <div class="rec-item"><div class="rl">行权价(IBEX)</div><div class="rv">{rec['K']:,}点</div></div>
     <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec['total']:,}</div></div>
     <div class="rec-item"><div class="rl">年化占比</div><div class="rv">{rec['annual']:.2f}%</div></div>
     <div class="rec-item"><div class="rl">操作频率</div><div class="rv">1次/年</div></div>
-    <div class="rec-item"><div class="rl">IBEX跌15%赔付</div><div class="rv">&euro;{max(rec['K']-round(IBEX_CURRENT*0.85),0)*N_CONTRACTS:,}</div></div>
-    <div class="rec-item"><div class="rl">IBEX跌30%赔付</div><div class="rv">&euro;{max(rec['K']-round(IBEX_CURRENT*0.70),0)*N_CONTRACTS:,}</div></div>
     <div class="rec-item"><div class="rl">5年总保费</div><div class="rv">&euro;{rec['total']*5:,}</div></div>
   </div>
 </div>
-<div class="chart-box"><div id="c5" style="height:340px"></div></div>
+
+<p style="margin:16px 0 8px;font-weight:700">如果PSI20跌到…你的基金会怎样？</p>
+<table>
+  <tr><th>PSI20跌到</th><th>基金预估市值</th><th>预估亏损</th><th>Put赔付</th><th>对冲后市值</th><th>覆盖率</th></tr>
+  {psi_rows}
+</table>
+<p class="note-sm">基于 Beta(基金/PSI20)={BETA_FUND_PSI}，Beta(IBEX/PSI20)={BETA_IBEX_PSI} 估算。实际偏差可能因R&sup2;较低而更大。</p>
+<div class="chart-box"><div id="c5" style="height:360px"></div></div>
 </div>
 
 <div class="section">
@@ -462,7 +536,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
   <li><b>搜索合约</b>：在IBKR搜索"IBEX 35"，找Mini IBEX期权（乘数&euro;1/点），到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>。</li>
   <li><b>买入{N_CONTRACTS}张</b>：限价单，参考价约&euro;{rec['price']:,.0f}/张，总计约&euro;{rec['total']:,}。</li>
-  <li><b>持有期间</b>：IBEX涨超20%（>{round(IBEX_CURRENT*1.2):,}）时考虑提前换仓，否则不用管。</li>
+  <li><b>持有期间</b>：IBEX涨超20%（>{round(ibex_now*1.2):,}）时考虑提前换仓，否则不用管。</li>
   <li><b>到期前1个月滚仓</b>：卖旧Put，买新的12个月ATM Put，周而复始。</li>
 </ol></div>
 </div>
@@ -509,15 +583,29 @@ if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});doc
     return html
 
 def main():
-    print('加载数据...')
+    print('获取实时价格...')
+    prices = fetch_live_prices()
+    fund_nav = prices.get('fund', 17.15)  # fallback
+    psi_now = prices.get('psi', 8862)
+    ibex_now = prices.get('ibex', 17062)
+    estx_now = prices.get('estx', 6138)
+    data_date = prices.get('fund_date', prices.get('ibex_date', '?'))
+    fund_value = round(fund_nav * FUND_UNITS)
+    live = dict(fund_nav=fund_nav, fund_value=fund_value, psi=psi_now,
+                ibex=ibex_now, estx=estx_now, data_date=data_date)
+    print(f'  基金NAV=€{fund_nav:.2f} 市值=€{fund_value:,} PSI20={psi_now:,.0f} IBEX={ibex_now:,.0f} ESTX={estx_now:,.0f}')
+
+    print('加载历史数据...')
     fund_df, ibex_df, psi_df = load_data()
-    print(f'基金{len(fund_df)}条 IBEX{len(ibex_df)}条 PSI{len(psi_df)}条')
+    print(f'  基金{len(fund_df)}条 IBEX{len(ibex_df)}条 PSI{len(psi_df)}条')
+
     print('分析...')
-    res = analyze(fund_df, ibex_df, psi_df)
+    res = analyze(fund_df, ibex_df, psi_df, live)
     ev = res['events']
-    print(f'{len(ev)}次急跌({sum(1 for e in ev if e["sync"])}次同步) 持仓期{sum(1 for e in ev if e["in_hold"])}次')
+    print(f'  {len(ev)}次急跌({sum(1 for e in ev if e["sync"])}次同步) 持仓期{sum(1 for e in ev if e["in_hold"])}次')
+
     print('生成报告...')
-    html = generate_html(fund_df, psi_df, res)
+    html = generate_html(fund_df, psi_df, res, live)
     out = os.path.join(DATA_DIR, 'hedge_final.html')
     with open(out, 'w', encoding='utf-8') as f: f.write(html)
     print(f'→ {out}')
