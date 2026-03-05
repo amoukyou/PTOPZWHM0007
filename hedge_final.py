@@ -293,7 +293,7 @@ def generate_html(fund_df, psi_df, res, live):
     psi_now = live['psi']
     ibex_now = live['ibex']
     estx_now = live['estx']
-    data_date = live.get('data_date', '?')
+    gen_time = live['gen_time']
 
     c1 = chart_fund_psi_ibex(fund_df, psi_df, res['df'][['Date','ibex']], live)
     c2 = chart_fund_ibex(df, events)
@@ -446,12 +446,18 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 
 <div class="data-bar">
   <div class="src">
-    数据来源：<b>Yahoo Finance</b>（基金NAV: 0P0001O8MU.F, PSI20, IBEX35, ESTOXX50）<br>
-    <span style="font-size:11px;color:#aaa">报告为静态快照，重新运行 <code>python3 hedge_final.py</code> 即可刷新全部数据</span>
+    数据来源：<b>Yahoo Finance</b><br>
+    <span style="font-size:11px;color:#aaa">
+      基金NAV (0P0001O8MU.F): {live['fund_date']} &middot;
+      PSI20: {live['psi_date']} &middot;
+      IBEX35: {live['ibex_date']} &middot;
+      ESTOXX50: {live['estx_date']}
+    </span><br>
+    <span style="font-size:11px;color:#aaa">重新运行 <code style="background:#eee;padding:1px 5px;border-radius:3px">python3 hedge_final.py</code> 即可刷新全部数据至最新交易日</span>
   </div>
-  <div>
-    <div style="font-size:11px;color:#888;text-align:right">生成于</div>
-    <div style="font-size:15px;font-weight:800;color:#1a237e">{data_date}</div>
+  <div style="text-align:right;min-width:140px">
+    <div style="font-size:11px;color:#888">报告生成于</div>
+    <div style="font-size:15px;font-weight:800;color:#1a237e">{gen_time}</div>
     <div class="timer" id="timer"></div>
   </div>
 </div>
@@ -610,7 +616,7 @@ function showTab(i){{
 if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});document.getElementById('zoom_0').dataset.r='1'}}
 // Countdown since generation
 (function(){{
-  var gen=new Date('{data_date}T18:00:00');
+  var gen=new Date('{gen_time.replace(" ","T")}:00');
   var el=document.getElementById('timer');
   function tick(){{
     var now=new Date();var d=Math.floor((now-gen)/1000);
@@ -631,16 +637,21 @@ if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});doc
     return html
 
 def main():
+    from datetime import datetime
     print('获取实时价格...')
     prices = fetch_live_prices()
     fund_nav = prices.get('fund', 17.15)  # fallback
     psi_now = prices.get('psi', 8862)
     ibex_now = prices.get('ibex', 17062)
     estx_now = prices.get('estx', 6138)
-    data_date = prices.get('fund_date', prices.get('ibex_date', '?'))
     fund_value = round(fund_nav * FUND_UNITS)
+    gen_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     live = dict(fund_nav=fund_nav, fund_value=fund_value, psi=psi_now,
-                ibex=ibex_now, estx=estx_now, data_date=data_date)
+                ibex=ibex_now, estx=estx_now, gen_time=gen_time,
+                fund_date=prices.get('fund_date','?'),
+                psi_date=prices.get('psi_date','?'),
+                ibex_date=prices.get('ibex_date','?'),
+                estx_date=prices.get('estx_date','?'))
     print(f'  基金NAV=€{fund_nav:.2f} 市值=€{fund_value:,} PSI20={psi_now:,.0f} IBEX={ibex_now:,.0f} ESTX={estx_now:,.0f}')
 
     print('加载历史数据...')
