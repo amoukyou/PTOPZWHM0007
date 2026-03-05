@@ -801,11 +801,12 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   {psi_rows}
 </table>
 <div class="alert a-warn" style="font-size:13px">
-  <b>线性模型局限</b>：上表覆盖率恒定约46%，因为模型假设损失和赔付同比例放大（纯线性）。
-  现实中极端行情下Beta会漂移、尾部相关性会变化，实际覆盖率可能高于或低于此值。
-  实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时IBEX与PSI20同步性更强，覆盖率可能<b>高于</b>此估计。<br>
-  <b>更重要的是</b>：此表假设Put行权价在事件发生时仍为ATM。如果IBEX在持有期内先涨后跌（如Event #10），
-  行权价早已变成深度虚值，实际覆盖率可能远低于46%。见下方"局限性"详细分析。
+  <b>线性模型局限</b>：上表覆盖率随跌幅递增——小跌时8张ATM独扛（覆盖率低），
+  大跌时20张OTM逐步启动、赔付加速上升（覆盖率可达50%以上）。这正是混合行权价策略的优势。<br>
+  但模型使用恒定Beta，极端行情下Beta会漂移、尾部相关性变化，实际覆盖率可能偏离。
+  实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时覆盖率可能<b>高于</b>此估计。<br>
+  <b>更重要的是</b>：此表假设Put行权价在事件发生时仍为ATM/OTM。如果IBEX在持有期内先涨后跌（如Event #10），
+  行权价被甩开变成深度虚值，实际覆盖率可能远低于表中数值。见下方"局限性"详细分析。
 </div>
 <div class="chart-box"><div id="c5" style="height:360px"></div></div>
 
@@ -840,6 +841,10 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   </div>
 </div>
 <div class="alert a-warn" style="font-size:13px">
+  <b>为什么是24张？</b>用急跌时的条件Beta（实证平均{avg_crash_ratio}）替代全样本Beta={BETA_FUND_IBEX}，
+  IBEX等效敞口=&euro;{fv:,}&times;{avg_crash_ratio}=&euro;{round(fv*avg_crash_ratio):,}，
+  除以IBEX点位&divide;{round(ibex_now):,}&asymp;<b>{round(fv*avg_crash_ratio/ibex_now)}张</b>。
+  取整后用实证比率定张数，比全样本Beta的16张多50%，在急跌时覆盖更充分。<br><br>
   <b>方案B的逻辑</b>：如果你认为小幅回调（5-10%）可以承受，只想防范崩盘式暴跌（>10%），
   那么全部买便宜的虚值Put，省下来的保费本身就是一种保护（少花钱=少损失确定成本）。<br>
   <b>适合</b>：风险承受力较高、不想每年花太多保费的投资者。<br>
@@ -882,14 +887,17 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
   <li><b>买第一腿——ATM Put &times;8</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>（ATM，50点间距）。参考价约&euro;{rec['price']:,.0f}/张，8张合计约&euro;{round(rec['price']*8):,}。</li>
   <li><b>买第二腿——90%OTM Put &times;20</b>：同到期月，行权价<b>{K_90:,}</b>（90% OTM）。参考价约&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/张，20张合计约&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}。</li>
-  <li><b>总保费</b>约&euro;{rec_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%），实际市价可能上浮10-30%。</li>
-  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超15%（>{round(ibex_now*1.15):,}）时必须提前滚仓</b>——
-  卖掉旧Put（已变深度虚值），买入新的ATM Put重设行权价。这能防止"先涨后跌"时Put变废纸（Event #10教训）。</li>
+  <li><b>总保费</b>约&euro;{rec_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%）。
+  <b>实际市价预计上浮10-30%</b>，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV={IBEX_IMPLIED_VOL*100:.1f}%更高，
+  OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。</li>
+  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超10%（>{round(ibex_now*1.10):,}）时必须提前滚仓</b>——
+  卖掉旧Put（已变深度虚值），买入新的ATM Put重设行权价。这能防止"先涨后跌"时Put变废纸（Event #10教训）。
+  建议每月检查一次IBEX涨幅，不要被动等触发。</li>
   <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
   动态滚仓会增加交易频率和额外保费支出（每次滚仓损失旧Put的剩余时间价值），但能确保行权价始终贴近当前市场，
-  避免保护失效。预计每年触发0-2次额外滚仓。
+  避免保护失效。10%触发阈值下预计每年触发1-3次额外滚仓。
 </div>
 </div>
 </div>
@@ -901,9 +909,11 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="steps"><ol>
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
   <li><b>买90%OTM Put &times;24</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{K_90:,}</b>（90% OTM，50点间距）。参考价约&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/张，24张合计约&euro;{planb_prem:,}。</li>
-  <li><b>总保费</b>约&euro;{planb_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%），实际市价可能上浮10-30%。</li>
-  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超15%（>{round(ibex_now*1.15):,}）时必须提前滚仓</b>——
-  卖掉旧Put（已变深度虚值），买入新的OTM Put重设行权价。</li>
+  <li><b>总保费</b>约&euro;{planb_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%）。
+  <b>实际市价预计上浮30-50%</b>——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV={IBEX_IMPLIED_VOL*100:.1f}%。
+  实际年成本可能达&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}。下单前务必以IBKR/MEFF实际报价为准。</li>
+  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超10%（>{round(ibex_now*1.10):,}）时必须提前滚仓</b>——
+  卖掉旧Put（已变深度虚值），买入新的OTM Put重设行权价。建议每月检查一次。</li>
   <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
 </ol></div>
 <div class="alert a-warn" style="font-size:13px">
@@ -919,7 +929,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <b>Event #10 教训：年度滚仓的致命缺陷</b><br>
   2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在2024年7月买入时的IBEX水平（约11,090点，注意：这是历史回测值，当前推荐行权价为{rec['K']:,}点），
   到事件发生时IBEX已涨到13,484点，即使跌到11,786点仍在行权价<b>之上</b>——Put几乎是废纸，覆盖仅约5%。<br><br>
-  <b>结论</b>：固定年度滚仓在"先涨后跌"行情下保护形同虚设。这就是为什么操作步骤中加入了<b>动态滚仓触发</b>（IBEX涨超15%即提前滚仓重设行权价）。
+  <b>结论</b>：固定年度滚仓在"先涨后跌"行情下保护形同虚设。这就是为什么操作步骤中加入了<b>动态滚仓触发</b>（IBEX涨超10%即提前滚仓重设行权价），并建议每月检查。
 </div>
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
