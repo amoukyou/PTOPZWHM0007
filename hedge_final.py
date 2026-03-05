@@ -177,12 +177,11 @@ def analyze(fund_df, ibex_df, psi_df):
     hold_events = find_drawdowns(df_hold)
     res['hold_events'] = hold_events
 
-    # Strategies to compare
+    # Strategies to compare (21M已在第四节否决，不再参与对比)
     strat_configs = [
         ('3M_ATM',  '3个月ATM 季滚',   3, 1.00, 4),
         ('6M_ATM',  '6个月ATM 半年滚',  6, 1.00, 2),
         ('12M_ATM', '12个月ATM 年滚',  12, 1.00, 1),
-        ('21M_95',  '21个月95%OTM(原)', 21, 0.95, 0.57),
     ]
     strategies = {}
     for key, label, months, spct, freq in strat_configs:
@@ -306,8 +305,8 @@ def chart_backtest(backtest):
 
 def chart_strategy_bars(hold_events, strategies):
     """Grouped bar: coverage % for each holding-period event, per strategy."""
-    strat_order = ['21M_95', '12M_ATM', '6M_ATM', '3M_ATM']
-    colors = {'21M_95':'#c62828', '12M_ATM':'#2e7d32', '6M_ATM':'#1565c0', '3M_ATM':'#6a1b9a'}
+    strat_order = ['12M_ATM', '6M_ATM', '3M_ATM']
+    colors = {'12M_ATM':'#2e7d32', '6M_ATM':'#1565c0', '3M_ATM':'#6a1b9a'}
 
     event_labels = []
     for ev in hold_events:
@@ -325,7 +324,7 @@ def chart_strategy_bars(hold_events, strategies):
         ))
 
     fig.update_layout(template='plotly_white', height=400, barmode='group',
-        yaxis_title='Put覆盖率 (Put市值增加 / 基金损失)', legend=dict(x=0.01, y=0.99),
+        yaxis_title='Put赚回的钱 占 基金损失的比例 (%)', legend=dict(x=0.01, y=0.99),
         margin=dict(t=20, b=80, l=60, r=20))
     return fig.to_json()
 
@@ -393,17 +392,14 @@ def generate_html(fund_df, psi_df, res):
           <td>{sync_tag}</td>
         </tr>"""
 
-    # ── Section 4: strategy cost comparison table ──
+    # ── Section 5: strategy cost comparison table ──
     cost_rows = ''
-    for skey in ['21M_95', '12M_ATM', '6M_ATM', '3M_ATM']:
+    for skey in ['12M_ATM', '6M_ATM', '3M_ATM']:
         s = strats[skey]
         is_rec = (skey == '12M_ATM')
-        is_old = (skey == '21M_95')
-        style = ' style="background:#f0fff0;font-weight:600"' if is_rec else (' style="background:#fff0f0"' if is_old else '')
-        tag = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_rec else (
-              ' <span style="color:#c62828;font-size:11px">[已否决]</span>' if is_old else '')
-        # 5-year projected cost using current IBEX
-        K_est = IBEX_CURRENT * (0.95 if skey == '21M_95' else 1.00)
+        style = ' style="background:#f0fff0;font-weight:600"' if is_rec else ''
+        tag = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_rec else ''
+        K_est = IBEX_CURRENT * 1.00
         T_est = s['months'] / 12
         prem_est = bs_put(IBEX_CURRENT, K_est, T_est) * N_CONTRACTS
         rolls_yr = 12 / s['months']
@@ -413,26 +409,46 @@ def generate_html(fund_df, psi_df, res):
         cost_rows += f"""<tr{style}>
           <td style="text-align:left">{s['label']}{tag}</td>
           <td>{s['freq']:.0f}x/年</td>
-          <td>&euro;{annual_est:,.0f}<br><span style="font-size:11px;color:#888">({annual_est/FUND_VALUE*100:.2f}%)</span></td>
-          <td>&euro;{five_yr:,.0f}<br><span style="font-size:11px;color:#888">({five_yr/FUND_VALUE*100:.1f}%)</span></td>
+          <td>&euro;{annual_est:,.0f}<br><span style="font-size:11px;color:#888">(占持仓{annual_est/FUND_VALUE*100:.2f}%)</span></td>
+          <td>&euro;{five_yr:,.0f}<br><span style="font-size:11px;color:#888">(占持仓{five_yr/FUND_VALUE*100:.1f}%)</span></td>
         </tr>"""
 
-    # ── Section 4b: strategy event results table ──
-    strat_ev_rows = ''
+    # ── Section 5b: strategy event results table (12M ATM only, detailed) ──
+    # Build a clear table: for the recommended strategy, show fund loss / put gain / net / coverage
+    s12 = strats['12M_ATM']
+    detail_rows = ''
+    for idx, ev in enumerate(hold_events):
+        fund_loss = abs(FUND_VALUE * ev['fund_chg'] / 100)
+        r = s12['event_results'][idx]
+        put_gain = r['mtm']
+        net_loss = fund_loss - put_gain
+        sync_tag = '<span style="color:#2e7d32;font-weight:700">同步下跌</span>' if ev['sync'] else '<span style="color:#e65100">脱钩</span>'
+        cov_color = '#2e7d32' if r['coverage'] >= 20 else ('#e65100' if r['coverage'] >= 5 else '#c62828')
+
+        detail_rows += f"""<tr{' style="background:#f0fff0"' if ev['sync'] else ''}>
+          <td>{ev['start'][5:]} ~ {ev['end'][5:]}</td>
+          <td>{sync_tag}<br><span style="font-size:11px;color:#888">IBEX {ev['ibex_chg']:+.1f}%</span></td>
+          <td style="color:#c62828;font-weight:600">-&euro;{fund_loss:,.0f}<br>
+              <span style="font-size:11px;color:#888">基金{ev['fund_chg']:.1f}%</span></td>
+          <td style="font-size:11px;color:#888">行权价{r['strike']:,.0f}<br>IBEX跌到{ev['ibex_level']:,.0f}</td>
+          <td style="color:#2e7d32;font-weight:700">+&euro;{put_gain:,.0f}</td>
+          <td style="color:#1565c0;font-weight:700">-&euro;{net_loss:,.0f}</td>
+          <td style="font-weight:700;color:{cov_color}">{r['coverage']:.0f}%</td>
+        </tr>"""
+
+    # Also build a compact comparison across 3 strategies
+    compare_rows = ''
     for idx, ev in enumerate(hold_events):
         fund_loss = abs(FUND_VALUE * ev['fund_chg'] / 100)
         sync_tag = '<span style="color:#2e7d32">同步</span>' if ev['sync'] else '<span style="color:#e65100">脱钩</span>'
         cells = ''
-        for skey in ['21M_95', '12M_ATM', '6M_ATM', '3M_ATM']:
+        for skey in ['12M_ATM', '6M_ATM', '3M_ATM']:
             r = strats[skey]['event_results'][idx]
             color = '#2e7d32' if r['coverage'] >= 20 else ('#e65100' if r['coverage'] >= 5 else '#c62828')
-            strike_info = f'<span style="font-size:10px;color:#888">K={r["strike"]:,.0f}</span><br>' if r['strike'] > 0 else ''
-            cells += f'<td style="color:{color}">{strike_info}&euro;{r["mtm"]:,.0f}<br><b>{r["coverage"]:.0f}%</b></td>'
-        strat_ev_rows += f"""<tr{' style="background:#f0fff0"' if ev['sync'] else ''}>
-          <td>{ev['start'][5:]}&rarr;{ev['end'][5:]}</td>
-          <td style="color:#1565c0;font-weight:600">{ev['fund_chg']:.1f}%<br>
-              <span style="font-size:11px;color:#888">(&euro;{fund_loss:,.0f})</span></td>
-          <td>{ev['ibex_chg']:+.1f}%<br>{sync_tag}</td>
+            cells += f'<td style="color:{color}">Put赚 &euro;{r["mtm"]:,.0f}<br><b>抵消{r["coverage"]:.0f}%损失</b></td>'
+        compare_rows += f"""<tr{' style="background:#f0fff0"' if ev['sync'] else ''}>
+          <td>{ev['start'][5:]}~{ev['end'][5:]}</td>
+          <td>基金亏&euro;{fund_loss:,.0f}<br>{sync_tag}</td>
           {cells}
         </tr>"""
 
@@ -600,44 +616,57 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="section">
 <h2>五、不同滚仓频率对比：季度 vs 半年 vs 年</h2>
 
-<p style="margin-bottom:12px">既然远期不行，就需要滚仓。更短的滚仓周期行权价更新鲜，但成本更高。以下是量化对比：</p>
+<p style="margin-bottom:12px">既然远期不行，就需要定期滚仓刷新行权价。滚得越频繁，行权价越贴近市价，但成本也越高。</p>
 
 <table>
   <tr><th style="text-align:left">策略</th><th>操作频率</th><th>年化成本</th><th>5年总成本</th></tr>
   {cost_rows}
 </table>
 
-<p style="margin-bottom:12px"><b>在你持仓期内{n_hold}次回撤中的实际表现</b>（每格=Put市值增加 / 基金损失）：</p>
+<p style="margin-bottom:16px"><b>12个月ATM（推荐方案）在你持仓期{n_hold}次回撤中的详细表现：</b></p>
+
+<div class="alert a-info" style="font-size:13px;margin-bottom:12px">
+  <b>怎么看这张表：</b>每次基金回撤时，基金那边亏了多少钱（红色），Put那边赚了多少钱（绿色），两者相抵后净亏多少（蓝色）。
+  覆盖率 = Put赚的 / 基金亏的。
+</div>
 
 <table>
-  <tr><th>回撤期</th><th>基金跌幅</th><th>IBEX</th>
-      <th style="background:#7b0000">21M 95%<br>(原方案)</th>
-      <th style="background:#1b5e20">12M ATM<br>(推荐)</th>
-      <th style="background:#0d47a1">6M ATM</th>
-      <th style="background:#4a148c">3M ATM</th></tr>
-  {strat_ev_rows}
+  <tr><th>回撤期</th><th>IBEX关系</th>
+      <th style="background:#7b0000">基金亏了</th>
+      <th>Put状态</th>
+      <th style="background:#1b5e20">Put赚了</th>
+      <th style="background:#0d47a1">相抵后净亏</th>
+      <th>覆盖率</th></tr>
+  {detail_rows}
+</table>
+
+<p style="margin-bottom:16px"><b>三种频率横向对比：</b></p>
+<table>
+  <tr><th>回撤期</th><th>基金损失</th>
+      <th style="background:#1b5e20">12个月ATM 年滚</th>
+      <th style="background:#0d47a1">6个月ATM 半年滚</th>
+      <th style="background:#4a148c">3个月ATM 季滚</th></tr>
+  {compare_rows}
 </table>
 
 <div class="chart-box"><div id="c4" style="height:400px"></div></div>
 
 <div class="alert a-info">
-  <b>关键发现：更频繁地滚仓并不能显著提高覆盖率。</b><br>
+  <b>关键发现：更频繁地滚仓并不能显著提高保护效果。</b><br>
   <ul style="margin:8px 0 0 18px">
-    <li>3个月季滚行权价最新鲜，但Put存续期短、时间价值低，即使进入价内赔付也有限</li>
-    <li>12个月年滚行权价稍旧，但Put有更多时间价值，暴跌时MTM升值更多</li>
-    <li>同步回撤中覆盖率：年滚平均20% &asymp; 半年滚21% &asymp; 季滚13%</li>
-    <li>而5年总成本：季滚&euro;{183564:,} &gt; 半年滚&euro;{124514:,} &gt; 年滚&euro;{82766:,}</li>
+    <li>3个月季滚行权价最贴近市价，但Put剩余期限短，即使进入价内，赚的钱也不多</li>
+    <li>12个月年滚行权价稍旧，但Put时间价值更高，IBEX暴跌时Put升值更快</li>
+    <li>5年总成本：季滚&euro;183,564 &gt; 半年滚&euro;124,514 &gt; <b>年滚&euro;82,766</b></li>
     <li><b>年滚花最少的钱，获得几乎同样的保护效果</b></li>
   </ul>
 </div>
 
 <div class="alert a-warn">
-  <b>为什么所有策略覆盖率都不高？</b><br>
-  因为过去1.5年IBEX从11,000涨到18,000（+63%），回撤只有3-12%，不足以跌回行权价附近。
-  <b>但这恰恰说明你持仓期内没有发生你真正担心的系统性危机。</b><br><br>
-  如果发生2022级别的危机（IBEX跌30%+），12个月ATM Put会提供充分保护——
-  因为30%的跌幅远远穿过行权价，赔付会非常可观。
-  <b>你买保险防的不是-5%的小波动，而是-30%的灾难。</b>
+  <b>为什么覆盖率都不高？</b><br>
+  因为过去1.5年IBEX从11,000涨到18,000（+63%），回撤只有3-12%——这不是你担心的那种危机。<br><br>
+  如果发生2022级别的系统性危机（IBEX跌30%+），Put会深度进入价内，
+  赚回的钱足以覆盖大部分甚至全部基金损失。
+  <b>你买的是灾难保险，不是小波动保险。</b>
 </div>
 </div>
 
