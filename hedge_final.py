@@ -248,11 +248,34 @@ def analyze(fund_df, ibex_df, psi_df, live):
             psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
             put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
             cov=round(put_pay/fund_loss*100) if fund_loss > 0 else 0))
+    # "跌回买入点"场景：PSI20回到入场时水平
+    psi_drop_entry = (PSI20_ENTRY_ACT - psi_now) / psi_now
+    ibex_entry_est = ibex_now * (1 + BETA_IBEX_PSI * psi_drop_entry)
+    fund_entry_est = fv * (1 + BETA_FUND_PSI * psi_drop_entry)
+    fund_entry_loss = fv - fund_entry_est
+    gain_now = fv - INITIAL_INV  # 当前浮盈
+    # Plan A payoff
+    pa_pay = sum(max(k - ibex_entry_est, 0) * n for n, k, p in rec_legs)
+    pa_net = fund_entry_est + pa_pay - rec_prem
+    # Plan B payoff
+    pb_pay = sum(max(k - ibex_entry_est, 0) * n for n, k, p in planb_legs)
+    pb_net = fund_entry_est + pb_pay - planb_prem
+    entry_scenario = dict(
+        psi_target=PSI20_ENTRY_ACT, psi_drop_pct=round(psi_drop_entry*100, 1),
+        ibex_est=round(ibex_entry_est), fund_est=round(fund_entry_est),
+        fund_loss=round(fund_entry_loss), gain_now=gain_now,
+        pa_pay=round(pa_pay), pa_net=round(pa_net),
+        pa_kept=round((pa_net - INITIAL_INV) / gain_now * 100) if gain_now > 0 else 0,
+        pb_pay=round(pb_pay), pb_net=round(pb_net),
+        pb_kept=round((pb_net - INITIAL_INV) / gain_now * 100) if gain_now > 0 else 0,
+        no_hedge_kept=round((fund_entry_est - INITIAL_INV) / gain_now * 100) if gain_now > 0 else 0,
+    )
     return dict(df=df, df_h=df_h, events=events, strats=strats, rec=rec,
                 options=options, psi_scenarios=psi_scenarios,
                 psi_scenarios_b=psi_scenarios_b,
                 K_90=K_90, rec_prem=rec_prem, planb_prem=planb_prem,
-                avg_crash_ratio=avg_crash_ratio, crash_ratios=crash_ratios)
+                avg_crash_ratio=avg_crash_ratio, crash_ratios=crash_ratios,
+                entry_scenario=entry_scenario)
 
 # ─── Charts ──────────────────────────────
 def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
@@ -424,6 +447,7 @@ def generate_html(fund_df, psi_df, res, live):
     planb_prem = res['planb_prem']
     avg_crash_ratio = res['avg_crash_ratio']
     crash_ratios = res['crash_ratios']
+    es = res['entry_scenario']
     K = rec['K']
     fv = live['fund_value']
     fund_nav = live['fund_nav']
@@ -784,6 +808,17 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   行权价早已变成深度虚值，实际覆盖率可能远低于46%。见下方"局限性"详细分析。
 </div>
 <div class="chart-box"><div id="c5" style="height:360px"></div></div>
+
+<div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #388e3c">
+  <b style="font-size:16px">如果PSI20跌回买入时的{es['psi_target']:,}点？（方案A）</b><br>
+  <span style="font-size:13px;color:#888">PSI20从当前跌{es['psi_drop_pct']}%，IBEX估计跌到{es['ibex_est']:,}点（Beta换算，非等比回落）</span><br><br>
+  <span style="display:inline-block;width:140px;color:#888">不对冲：</span>
+  &euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，浮盈保住<b>{es['no_hedge_kept']}%</b><br>
+  <span style="display:inline-block;width:140px;color:#2e7d32;font-weight:700">方案A对冲后：</span>
+  &euro;{fv:,} &rarr; <b style="color:#2e7d32">&euro;{es['pa_net']:,}</b>，
+  Put赔付<b style="color:#2e7d32">+&euro;{es['pa_pay']:,}</b>，浮盈保住<b style="color:#2e7d32">{es['pa_kept']}%</b><br>
+  <span style="font-size:12px;color:#888">当前浮盈 &euro;{es['gain_now']:,}，买入成本 &euro;{INITIAL_INV:,}</span>
+</div>
 </div>
 </div>
 
@@ -818,6 +853,18 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   只有PSI20跌到较低水平（约7500以下），Put才开始大额赔付。
 </div>
 <div class="chart-box"><div id="c5b" style="height:360px"></div></div>
+
+<div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #e65100;background:#fff3e0;border-left:5px solid #e65100">
+  <b style="font-size:16px;color:#e65100">如果PSI20跌回买入时的{es['psi_target']:,}点？（方案B）</b><br>
+  <span style="font-size:13px;color:#888">PSI20从当前跌{es['psi_drop_pct']}%，IBEX估计跌到{es['ibex_est']:,}点（Beta换算，非等比回落）</span><br><br>
+  <span style="display:inline-block;width:140px;color:#888">不对冲：</span>
+  &euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，浮盈保住<b>{es['no_hedge_kept']}%</b><br>
+  <span style="display:inline-block;width:140px;color:#e65100;font-weight:700">方案B对冲后：</span>
+  &euro;{fv:,} &rarr; <b style="color:#e65100">&euro;{es['pb_net']:,}</b>，
+  Put赔付<b style="color:#e65100">+&euro;{es['pb_pay']:,}</b>，浮盈保住<b style="color:#e65100">{es['pb_kept']}%</b><br>
+  <span style="font-size:12px;color:#888">当前浮盈 &euro;{es['gain_now']:,}，买入成本 &euro;{INITIAL_INV:,}。
+  方案A同场景下保住浮盈{es['pa_kept']}%，多保{es['pa_kept']-es['pb_kept']}个百分点，但每年多花&euro;{rec_prem-planb_prem:,}保费。</span>
+</div>
 </div>
 </div>
 
