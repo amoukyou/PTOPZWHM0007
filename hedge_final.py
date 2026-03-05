@@ -65,10 +65,10 @@ def load_data():
 
 
 def find_weekly_drops(df, threshold=-3.0):
-    """找出基金1周(5个交易日)内跌幅超过threshold%的所有事件"""
+    """找出基金1周(5个交易日)内跌幅超过threshold%的所有事件。
+    IBEX同步判定使用±2周窗口，避免因IBEX滞后几天而误判为脱钩。"""
     df = df.copy()
     df['fund_5d'] = df['fund'].pct_change(5) * 100
-    df['ibex_5d'] = df['ibex'].pct_change(5) * 100
 
     drops = df[df['fund_5d'] < threshold].copy()
     events = []
@@ -79,13 +79,9 @@ def find_weekly_drops(df, threshold=-3.0):
         if prev_end is not None and (d - prev_end).days < 10:
             if row['fund_5d'] < events[-1]['fund_chg']:
                 events[-1]['fund_chg'] = row['fund_5d']
-                events[-1]['ibex_chg'] = row['ibex_5d']
                 events[-1]['worst_date'] = d
-                events[-1]['ibex_level'] = row['ibex']
-                events[-1]['fund_level'] = row['fund']
             events[-1]['end'] = d
         else:
-            # find the start of the 5-day window
             idx = df.index[df['Date'] == d][0]
             start_idx = max(0, idx - 5)
             events.append(dict(
@@ -93,21 +89,32 @@ def find_weekly_drops(df, threshold=-3.0):
                 end=d,
                 worst_date=d,
                 fund_chg=row['fund_5d'],
-                ibex_chg=row['ibex_5d'],
-                ibex_level=row['ibex'],
-                fund_level=row['fund'],
-                ibex_start=df['ibex'].iloc[start_idx],
-                fund_start=df['fund'].iloc[start_idx],
-                sync=row['ibex_5d'] < -1.5,
             ))
         prev_end = d
 
-    # update sync flag for merged events
+    # For each event, check IBEX in ±2 week window (captures lagged moves)
     for ev in events:
-        ev['sync'] = ev['ibex_chg'] < -1.5
+        idx_s = df.index[df['Date'] == ev['start']][0]
+        idx_e = df.index[df['Date'] == ev['end']][0]
+        lo = max(0, idx_s - 5)
+        hi = min(len(df) - 1, idx_e + 10)
+
+        ibex_peak = df['ibex'].iloc[lo:hi+1].max()
+        ibex_trough_val = df['ibex'].iloc[lo:hi+1].min()
+        ibex_trough_idx = lo + df['ibex'].iloc[lo:hi+1].values.argmin()
+        ibex_chg = (ibex_trough_val / ibex_peak - 1) * 100
+
+        ev['ibex_chg'] = ibex_chg
+        ev['ibex_level'] = ibex_trough_val
+        ev['ibex_peak'] = ibex_peak
+        ev['fund_level'] = df['fund'].iloc[df.index[df['Date'] == ev['worst_date']][0]]
+        ev['sync'] = ibex_chg < -1.5
         ev['start_str'] = ev['start'].strftime('%Y-%m-%d')
         ev['end_str'] = ev['worst_date'].strftime('%Y-%m-%d')
         ev['in_hold'] = ev['worst_date'] >= pd.Timestamp(ENTRY_DATE)
+        # for zoom chart: use the wider window
+        ev['window_lo_idx'] = lo
+        ev['window_hi_idx'] = hi
 
     return events
 
@@ -182,16 +189,18 @@ def analyze(fund_df, ibex_df, psi_df):
         ev['strat_results'] = {}
         if not ev['in_hold']:
             continue
-        # find this event's worst_date in df_hold
-        mask = df_hold['Date'] == ev['worst_date']
-        if mask.sum() == 0:
-            continue
-        day_idx = df_hold.index[mask][0]
         fund_loss = abs(FUND_VALUE * ev['fund_chg'] / 100)
         ev['fund_loss'] = fund_loss
 
+        # For put valuation, find the day within ±2wk window where IBEX is at trough
+        # We need to find this day in df_hold
+        ibex_trough_val = ev['ibex_level']
+        # Find the closest matching day in df_hold
+        ibex_diffs = (df_hold['ibex'] - ibex_trough_val).abs()
+        trough_day_idx = ibex_diffs.idxmin()
+
         for skey, s in strats.items():
-            mtm, strike = get_put_mtm(s['positions'], ev['ibex_level'], day_idx)
+            mtm, strike = get_put_mtm(s['positions'], ibex_trough_val, trough_day_idx)
             coverage = mtm / fund_loss * 100 if fund_loss > 0 else 0
             ev['strat_results'][skey] = dict(mtm=mtm, strike=strike, coverage=coverage)
 
@@ -289,14 +298,14 @@ def make_event_zoom_charts(df, events, strategies):
             charts.append(None)
             continue
 
-        # Find window: ±15 trading days around worst_date
+        # Find window: ±20 trading days around worst_date (wide enough to see IBEX lag)
         center_mask = df_hold['Date'] == ev['worst_date']
         if center_mask.sum() == 0:
             charts.append(None)
             continue
         center_idx = df_hold.index[center_mask][0]
-        lo = max(0, center_idx - 15)
-        hi = min(len(df_hold) - 1, center_idx + 15)
+        lo = max(0, center_idx - 20)
+        hi = min(len(df_hold) - 1, center_idx + 20)
         window = df_hold.iloc[lo:hi+1]
 
         ref_f = window['fund'].iloc[0]
@@ -455,9 +464,9 @@ def generate_html(fund_df, psi_df, res):
                 <b>{ev['start_str']} ~ {ev['end_str']}</b><br>
                 基金1周跌 <b style="color:#c62828">{ev['fund_chg']:.1f}%</b>
                 (约&euro;{fund_loss:,.0f})<br>
-                IBEX同期 <b style="color:{'#2e7d32' if ev['sync'] else '#e65100'}">{ev['ibex_chg']:+.1f}%</b>
-                (跌到{ev['ibex_level']:,.0f}点)<br>
-                状态：<b>{sync_label}</b> {'— Put有保护作用' if ev['sync'] else '— IBEX没跟，Put无效'}
+                IBEX前后2周最大跌幅 <b style="color:#2e7d32">{ev['ibex_chg']:+.1f}%</b>
+                ({ev['ibex_peak']:,.0f}&rarr;{ev['ibex_level']:,.0f}点)<br>
+                <b>IBEX同步下跌，Put有保护作用</b>
               </div>
               <table style="font-size:13px">
                 <tr><th style="text-align:left">策略</th><th>行权价</th><th>Put赚了</th><th>相抵后净亏</th><th>覆盖率</th></tr>
@@ -581,7 +590,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 
 <p style="margin-bottom:12px">基金成立以来，<b>1周内跌幅超过3%</b>的全部<b>{n_total}次</b>事件：</p>
 <table>
-  <tr><th>#</th><th>时期</th><th>基金1周跌幅</th><th>IBEX同期</th><th>IBEX到达</th><th>关系</th></tr>
+  <tr><th>#</th><th>时期</th><th>基金1周跌幅</th><th>IBEX&plusmn;2周<br>最大跌幅</th><th>IBEX谷底</th><th>关系</th></tr>
   {hist_rows}
 </table>
 
