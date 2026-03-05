@@ -1,7 +1,10 @@
 """
-葡萄牙基金对冲方案 — 完整报告 v9
-- 持仓概况实时更新(基金NAV/PSI20/IBEX/ESTOXX50从yfinance获取)
-- 推荐方案用PSI20点位+基金市值展示，不再用IBEX点位
+葡萄牙基金对冲方案 — 完整报告 v10
+- 删除循环论证的99%覆盖率，如实展示保护局限
+- 正面讨论Event #10暴露的年度滚仓缺陷
+- 新增动态滚仓触发机制(IBEX涨超15%即提前滚仓)
+- Beta链说明改为独立回归，不暗示推导关系
+- 结论如实反映：减震垫，不是全额保险
 """
 
 import os, sys, math
@@ -378,23 +381,20 @@ def generate_html(fund_df, psi_df, res, live):
             <div class="chart-box" style="padding:8px"><div id="zoom_{i}" style="height:260px"></div></div>
           </div></div>"""
 
-    # Contract options table
+    # Contract options table (show EUR payoff only, no circular coverage %)
     opt_rows = ''
     for opt in options:
         is_rec = opt['n'] == 16
         st = ' style="background:#f0fff0;font-weight:600"' if is_rec else ''
         tag = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_rec else ''
         s10, s20, s30 = opt['scenarios'][10], opt['scenarios'][20], opt['scenarios'][30]
-        c10 = '#2e7d32' if s10['cov']>=80 else ('#e65100' if s10['cov']>=40 else '#c62828')
-        c20 = '#2e7d32' if s20['cov']>=80 else ('#e65100' if s20['cov']>=40 else '#c62828')
-        c30 = '#2e7d32' if s30['cov']>=80 else ('#e65100' if s30['cov']>=40 else '#c62828')
         opt_rows += f'''<tr{st}>
           <td style="text-align:left">{opt['label']}{tag}<br><span style="font-size:10px;color:#888">{opt['desc']}</span></td>
           <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/年</span></td>
           <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/fv*100:.1f}%</span></td>
-          <td style="color:{c10}">&euro;{s10['payoff']:,}<br><span style="font-size:10px">覆盖{s10['cov']}%</span></td>
-          <td style="color:{c20}">&euro;{s20['payoff']:,}<br><span style="font-size:10px">覆盖{s20['cov']}%</span></td>
-          <td style="color:{c30}">&euro;{s30['payoff']:,}<br><span style="font-size:10px">覆盖{s30['cov']}%</span></td>
+          <td style="color:#2e7d32;font-weight:600">&euro;{s10['payoff']:,}</td>
+          <td style="color:#2e7d32;font-weight:600">&euro;{s20['payoff']:,}</td>
+          <td style="color:#2e7d32;font-weight:600">&euro;{s30['payoff']:,}</td>
         </tr>'''
 
     # Cost table (rolling frequency)
@@ -536,7 +536,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 
 <div class="section">
-<h2>三、对冲链路</h2>
+<h2>三、对冲链路与Beta说明</h2>
 <div class="chain">
   <div class="chain-node"><div style="font-size:12px;color:#888">你持有的</div><div style="font-size:17px;font-weight:800;color:#1565c0">葡萄牙基金</div></div>
   <div class="chain-arrow">&rarr;</div>
@@ -547,26 +547,35 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <div class="chain-node" style="border:2px solid #2e7d32"><div style="font-size:12px;color:#2e7d32">替代</div><div style="font-size:17px;font-weight:800;color:#e65100">IBEX35 Put</div><div style="font-size:11px;color:#888">MEFF &middot; IBKR可交易</div></div>
 </div>
 <div class="alert a-info">
-  合约数量按Beta={BETA_FUND_IBEX}计算：基金对IBEX的敏感度为42%，
+  合约数量按Beta(基金/IBEX)={BETA_FUND_IBEX}计算：基金对IBEX的敏感度为42%，
   需要对冲的名义敞口=&euro;{fv:,}&times;{BETA_FUND_IBEX}=&euro;{round(fv*BETA_FUND_IBEX):,}，
   除以IBEX点位=<b>{N_CONTRACTS}张Mini合约</b>（乘数&euro;1/点）。
+</div>
+<div class="alert a-warn">
+  <b>Beta说明</b>：以下三个Beta是分别独立回归的结果，<b>不是</b>链式推导关系：<br>
+  &middot; Beta(基金/PSI20) = {BETA_FUND_PSI}（R&sup2;=79%，基金跟踪PSI20较好）<br>
+  &middot; Beta(基金/IBEX) = {BETA_FUND_IBEX}（R&sup2;=42%，IBEX只能解释基金42%的波动）<br>
+  &middot; Beta(IBEX/PSI20) = {BETA_IBEX_PSI}（用于PSI20场景→IBEX点位换算）<br>
+  <span style="font-size:12px;color:#888">注：R&sup2;=42%意味着基金有58%的波动无法被IBEX解释。Put只对冲IBEX相关的那42%风险。</span>
 </div>
 </div>
 
 <div class="section">
 <h2>四、买多少张合约？</h2>
 <div class="alert a-info">
-  合约张数决定保护力度。越多覆盖越高，但保费也越贵。下表展示三种配置在不同IBEX跌幅下的表现：
+  合约张数决定Put赔付金额。下表展示三种配置在不同IBEX跌幅下的<b>Put赔付金额</b>（不含保费扣除）：
 </div>
 <table>
   <tr><th style="text-align:left">配置</th><th>年保费</th><th>5年总保费</th><th>IBEX跌10%</th><th>IBEX跌20%</th><th>IBEX跌30%</th></tr>
   {opt_rows}
 </table>
-<div class="alert a-warn">
-  <b>覆盖率含义</b>：IBEX跌X%时，按Beta={BETA_FUND_IBEX}估算基金对应损失。覆盖率 = Put赔付 &divide; 基金估算损失。<br>
-  <b>推荐16张</b>：年花&euro;{options[0]['prem']:,}（{options[0]['annual_pct']:.2f}%），大跌20%+时覆盖接近100%。
-  中等回调（10%）覆盖约{options[0]['scenarios'][10]['cov']}%，但成本最低、性价比最好。<br>
-  如果想要更高安全感，可选24张，保费增加50%但中等回调也能覆盖更多。
+<div class="alert a-bad">
+  <b>重要：Put赔付 &ne; 基金损失覆盖</b><br>
+  上表的赔付金额是IBEX维度的确定值。但基金的实际损失取决于PSI20和基金自身因素（R&sup2;=42%），
+  Put无法覆盖IBEX以外的58%风险。<br>
+  <b>实际覆盖率取决于场景</b>：在PSI20维度的估算中约为40-50%（见下方场景表），
+  而在2025年3-4月的真实回测中仅约5%（因"先涨后跌"导致行权价被甩开）。<br>
+  <b>这不是保险，是减震垫。</b>
 </div>
 </div>
 
@@ -599,7 +608,12 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <tr><th>PSI20跌到</th><th>基金预估市值</th><th>预估亏损</th><th>Put赔付</th><th>对冲后市值</th><th>覆盖率</th></tr>
   {psi_rows}
 </table>
-<p class="note-sm">基于 Beta(基金/PSI20)={BETA_FUND_PSI}，Beta(IBEX/PSI20)={BETA_IBEX_PSI} 估算。实际偏差可能因R&sup2;较低而更大。</p>
+<div class="alert a-warn" style="font-size:13px">
+  <b>线性模型局限</b>：上表覆盖率恒定约46%，因为模型假设损失和赔付同比例放大（纯线性）。
+  现实中极端行情下Beta会漂移、尾部相关性会变化，实际覆盖率可能高于或低于此值。<br>
+  <b>更重要的是</b>：此表假设Put行权价在事件发生时仍为ATM。如果IBEX在持有期内先涨后跌（如Event #10），
+  行权价早已变成深度虚值，实际覆盖率可能远低于46%。见下方"局限性"详细分析。
+</div>
 <div class="chart-box"><div id="c5" style="height:360px"></div></div>
 </div>
 
@@ -609,17 +623,30 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
   <li><b>搜索合约</b>：在IBKR搜索"IBEX 35"，找Mini IBEX期权（乘数&euro;1/点），到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>。</li>
   <li><b>买入{N_CONTRACTS}张</b>：限价单，参考价约&euro;{rec['price']:,.0f}/张，总计约&euro;{rec['total']:,}。</li>
-  <li><b>持有期间</b>：IBEX涨超20%（>{round(ibex_now*1.2):,}）时考虑提前换仓，否则不用管。</li>
-  <li><b>到期前1个月滚仓</b>：卖旧Put，买新的12个月ATM Put，周而复始。</li>
+  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超15%（>{round(ibex_now*1.15):,}）时必须提前滚仓</b>——
+  卖掉旧Put（已变深度虚值），买入新的ATM Put重设行权价。这能防止"先涨后跌"时Put变废纸（Event #10教训）。</li>
+  <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
 </ol></div>
+<div class="alert a-info" style="font-size:13px">
+  动态滚仓会增加交易频率和额外保费支出（每次滚仓损失旧Put的剩余时间价值），但能确保行权价始终贴近当前市场，
+  避免保护失效。预计每年触发0-2次额外滚仓。
+</div>
 </div>
 
 <div class="section">
-<h2>八、局限性</h2>
+<h2>八、局限性（必读）</h2>
+<div class="alert a-bad">
+  <b>Event #10 教训：年度滚仓的致命缺陷</b><br>
+  2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在买入时的IBEX水平（约11,090点），
+  到事件发生时IBEX已涨到13,484点，即使跌到11,786点仍在行权价<b>之上</b>——Put几乎是废纸，覆盖仅约5%。<br><br>
+  <b>结论</b>：固定年度滚仓在"先涨后跌"行情下保护形同虚设。这就是为什么操作步骤中加入了<b>动态滚仓触发</b>（IBEX涨超15%即提前滚仓重设行权价）。
+</div>
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
-    <li><b>保费是确定支出</b>：每年&euro;{rec['total']:,}，5年不出事白花&euro;{rec['total']*5:,}。</li>
-    <li><b>Beta估算有误差</b>：R&sup2;=42%意味着IBEX只能解释基金42%的波动。实际基金可能跌得比Beta预测的多，导致覆盖不足。</li>
+    <li><b>这是减震垫，不是全额保险</b>：在理想线性假设下覆盖约46%的基金损失。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。</li>
+    <li><b>保费是确定支出</b>：每年&euro;{rec['total']:,}，5年不出事白花&euro;{rec['total']*5:,}（组合的{rec['total']*5/fv*100:.1f}%）。</li>
+    <li><b>R&sup2;=42%的根本限制</b>：IBEX只能解释基金42%的波动。基金可能因为葡萄牙本地原因（个股暴雷、流动性危机）大跌而IBEX无动于衷，此时Put完全无效。</li>
+    <li><b>线性模型在极端行情下失真</b>：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。</li>
     <li><b>IV影响成本</b>：恐慌期Put更贵，尽量在平静期滚仓。</li>
   </ol>
 </div>
@@ -627,9 +654,12 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 
 <div class="section">
 <h2>九、总结</h2>
-<div class="alert a-note" style="font-size:15px;line-height:2">
-  <b style="font-size:17px;color:#4a148c">{N_CONTRACTS}张 Mini IBEX35 12个月ATM Put，每年滚仓</b><br>
-  历史{nt}次急跌IBEX<b>100%同步</b>。年化成本{rec['annual']:.2f}%，5年约&euro;{rec['total']*5:,}，每年操作1次。
+<div class="alert a-note" style="font-size:14px;line-height:1.9">
+  <b style="font-size:17px;color:#4a148c">{N_CONTRACTS}张 Mini IBEX35 12个月ATM Put + 动态滚仓</b><br>
+  <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。当IBEX跟跌且Put行权价仍为ATM时，可覆盖基金约40-50%的估算损失。<br>
+  <b>做不到的</b>：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。<br>
+  <b>成本</b>：年化{rec['annual']:.2f}%（&euro;{rec['total']:,}/年），5年约&euro;{rec['total']*5:,}，是确定的支出。<br>
+  <b>本质</b>：这是一个减震垫，不是全额保险。它降低了系统性暴跌中的最大亏损幅度，但不能保证你不亏钱。
 </div>
 </div>
 
