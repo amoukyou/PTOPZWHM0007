@@ -25,12 +25,14 @@ jobs:
         run: python3 hedge_final.py
 
       - name: Copy to docs
-        run: cp hedge_final.html docs/index.html
+        run: |
+          cp hedge_final.html docs/index.html
+          cp collar.html docs/collar.html
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add hedge_final.html docs/index.html
+          git add hedge_final.html collar.html docs/index.html docs/collar.html
           git diff --cached --quiet || git commit -m "auto: update report $(date -u +%Y-%m-%d)"
           git push
