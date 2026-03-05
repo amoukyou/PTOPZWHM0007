@@ -890,18 +890,20 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <li><b>总保费</b>约&euro;{rec_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%）。
   <b>实际市价预计上浮10-30%</b>，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV={IBEX_IMPLIED_VOL*100:.1f}%更高，
   OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。</li>
-  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超10%（>{round(ibex_now*1.10):,}）时必须提前滚仓</b>——
-  卖掉旧Put（已变深度虚值），买入新的ATM Put重设行权价。这能防止"先涨后跌"时Put变废纸（Event #10教训）。
-  建议每月检查一次IBEX涨幅，不要被动等触发。</li>
-  <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
+  <li><b>分腿动态滚仓</b>（关键！）：ATM腿和OTM腿职责不同，滚仓策略也不同：<br>
+  <b style="color:#1565c0">ATM×8（跟踪腿）</b>：IBEX涨超10%（>{round(ibex_now*1.10):,}）时<b>立即滚仓</b>——卖掉旧ATM Put，买入新ATM Put重设行权价。
+  ATM必须紧贴当前市场，否则小跌时赔不了（Event #10教训）。建议每月检查。<br>
+  <b style="color:#e65100">OTM×20（兜底腿）</b>：<b>不参与动态滚仓</b>，只做年度正常到期滚仓。
+  OTM买来就是防崩盘（-20%~-30%），IBEX涨10%后它从虚值10%变成虚值20%，但真来大崩盘时仍会深度实值，赔付差额有限。</li>
+  <li><b>到期前1个月滚仓</b>：ATM和OTM两条腿都正常到期滚仓，卖旧买新，周而复始。</li>
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
-  <b>动态滚仓的隐性成本</b>：每次滚仓损失旧Put的剩余时间价值（估计为原价的30-60%），同时以更高行权价买入新Put。
-  假设每年触发2次额外滚仓，每次损失旧Put约40%的时间价值：<br>
-  &middot; 方案A额外成本 &asymp; &euro;{rec_prem:,} &times; 40% &times; 2 = <b>&euro;{round(rec_prem*0.4*2):,}/年</b><br>
-  &middot; 方案A真实年化总成本可能达 <b>&euro;{rec_prem + round(rec_prem*0.4*2):,}</b>（BS理论值 + 滚仓损耗，未含skew上浮）<br>
-  这是整个方案中最大的未量化风险。降低触发阈值能提高保护有效性，但也增加滚仓频率和成本。
-  10%触发阈值下预计每年触发1-3次额外滚仓。
+  <b>分腿滚仓的成本优势</b>：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。<br>
+  &middot; <b>全部滚仓</b>（旧方案）：28张全滚，单次损耗 &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <b>&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4):,}</b>，每年2次 = &euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4)*2):,}/年<br>
+  &middot; <b>分腿滚仓</b>（推荐）：只滚8张ATM，单次损耗 &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b>&euro;{round(rec['price']*8*0.4):,}</b>，每年2次 = &euro;{round(rec['price']*8*0.4*2):,}/年<br>
+  &middot; <b>每年节省约&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2):,}</b>，5年节省约&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2*5):,}<br><br>
+  <b>代价</b>：在"连续大涨后崩盘"的极端场景中，未滚仓的OTM行权价较低，赔付会少约&euro;{round((ibex_now*0.1)*20):,}。
+  但这笔差额与5年节省的滚仓成本大致打平。在更常见的"涨后中小跌"场景中，OTM本来就不赔，分不分开滚没有区别。
 </div>
 </div>
 </div>
@@ -916,16 +918,19 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <li><b>总保费</b>约&euro;{planb_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%）。
   <b>实际市价预计上浮30-50%</b>——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV={IBEX_IMPLIED_VOL*100:.1f}%。
   实际年成本可能达&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}。下单前务必以IBKR/MEFF实际报价为准。</li>
-  <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超10%（>{round(ibex_now*1.10):,}）时必须提前滚仓</b>——
-  卖掉旧Put（已变深度虚值），买入新的OTM Put重设行权价。建议每月检查一次。</li>
-  <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
+  <li><b>动态滚仓</b>：方案B全部是OTM Put，与方案A的分腿滚仓逻辑类似——
+  OTM的职责是防崩盘，IBEX涨10%后从虚值10%变成虚值20%，但大崩盘时仍会深度实值。
+  因此方案B<b>以年度正常滚仓为主</b>，不需要频繁动态触发。<br>
+  但如果IBEX<b>累计涨超20%</b>（>{round(ibex_now*1.20):,}），OTM行权价已严重脱离市场，此时应滚仓重设行权价。建议每月检查。</li>
+  <li><b>到期前1个月滚仓</b>：正常到期前卖旧买新，周而复始。</li>
 </ol></div>
 <div class="alert a-warn" style="font-size:13px">
   <b>方案B注意</b>：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。
   如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。<br><br>
-  <b>动态滚仓隐性成本</b>：与方案A同理，每次额外滚仓损失旧Put约40%的时间价值。
-  假设每年2次：额外成本 &asymp; &euro;{planb_prem:,} &times; 40% &times; 2 = <b>&euro;{round(planb_prem*0.4*2):,}/年</b>。
-  方案B真实年化总成本可能达 <b>&euro;{planb_prem + round(planb_prem*0.4*2):,}</b>（含skew后更高）。
+  <b>方案B的滚仓成本优势</b>：因为以年度滚仓为主（动态触发阈值为20%，远高于方案A的10%），
+  预计每年额外动态滚仓0-1次，滚仓损耗远低于方案A。
+  即使触发1次：24&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4):,}。
+  方案B真实年化总成本 &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}（平均0.5次/年） = <b>&euro;{planb_prem + round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}</b>（未含skew上浮）。
 </div>
 </div>
 </div>
