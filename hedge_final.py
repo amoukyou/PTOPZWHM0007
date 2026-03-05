@@ -192,38 +192,45 @@ def analyze(fund_df, ibex_df, psi_df, live):
     K = round(ibex_now / 50) * 50  # MEFF标准行权价间距50点
     p1 = bs_put(ibex_now, K, 1.0)
     rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/fv*100,2))
-    # Contract count options for comparison
+    # Mixed-strike configurations
+    K_90 = round(ibex_now * 0.90 / 50) * 50
+    K_85 = round(ibex_now * 0.85 / 50) * 50
+    p_90 = bs_put(ibex_now, K_90, 1.0)
+    p_85 = bs_put(ibex_now, K_85, 1.0)
     options = []
-    for n, label, desc in [
-        (16, '16张 (Beta调整)', f'覆盖Beta敞口€{round(fv*BETA_FUND_IBEX):,}'),
-        (24, '24张 (1.5×Beta)', '在Beta基础上加50%安全垫'),
-        (38, '38张 (全额名义)', f'覆盖基金全额€{fv:,}'),
-    ]:
-        prem = round(p1 * n)
+    configs = [
+        ('纯ATM ×16', '现方案：全部平值', [(16, K, p1)]),
+        (f'ATM ×8 + 90%OTM ×20', '混合：小跌有底+大跌加倍', [(8, K, p1), (20, K_90, p_90)]),
+        (f'ATM ×4 + 90%OTM ×30', '进取：重注大跌保护', [(4, K, p1), (30, K_90, p_90)]),
+        (f'纯90%OTM ×24', '省钱：放弃小跌，只防崩盘', [(24, K_90, p_90)]),
+    ]
+    for label, desc, legs in configs:
+        prem = round(sum(p * n for n, k, p in legs))
         scenarios = {}
-        for drop_pct in [10, 15, 20, 30]:
-            ibex_drop = round(ibex_now * (1 - drop_pct/100))
-            put_payoff = max(K - ibex_drop, 0) * n
-            fund_loss = abs(fv * BETA_FUND_IBEX * drop_pct / 100)
-            cov = put_payoff / fund_loss * 100 if fund_loss > 0 else 0
-            scenarios[drop_pct] = dict(payoff=put_payoff, fund_loss=round(fund_loss), cov=round(cov))
-        options.append(dict(n=n, label=label, desc=desc, prem=prem,
+        for drop_pct in [5, 10, 15, 20, 30]:
+            ibex_drop = ibex_now * (1 - drop_pct/100)
+            put_payoff = sum(max(k - ibex_drop, 0) * n for n, k, p in legs)
+            scenarios[drop_pct] = dict(payoff=round(put_payoff))
+        options.append(dict(label=label, desc=desc, legs=legs, prem=prem,
                             annual_pct=round(prem/fv*100, 2), five_yr=prem*5, scenarios=scenarios))
-    # PSI20 scenario table for section 六
+    # PSI20 scenario table for section 六 — using recommended mixed config
+    rec_legs = configs[1][2]  # ATM×8 + 90%OTM×20
+    rec_prem = round(sum(p * n for n, k, p in rec_legs))
     psi_scenarios = []
-    for psi_target in [8000, 7500, 7000, 6000]:
+    for psi_target in [8500, 8000, 7500, 7000, 6000]:
         psi_drop_pct = (psi_target - psi_now) / psi_now  # negative
         ibex_est = ibex_now * (1 + BETA_IBEX_PSI * psi_drop_pct)
         fund_est = fv * (1 + BETA_FUND_PSI * psi_drop_pct)
         fund_loss = fv - fund_est
-        put_pay = max(K - ibex_est, 0) * N_CONTRACTS
-        net = fund_est + put_pay - rec['total']  # fund value + put payoff - premium
+        put_pay = sum(max(k - ibex_est, 0) * n for n, k, p in rec_legs)
+        net = fund_est + put_pay - rec_prem
         psi_scenarios.append(dict(
             psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
             put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
             cov=round(put_pay/fund_loss*100) if fund_loss > 0 else 0))
     return dict(df=df, df_h=df_h, events=events, strats=strats, rec=rec,
-                options=options, psi_scenarios=psi_scenarios)
+                options=options, psi_scenarios=psi_scenarios,
+                K_90=K_90, rec_prem=rec_prem)
 
 # ─── Charts ──────────────────────────────
 def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
@@ -311,21 +318,35 @@ def make_zoom_charts(df, events, strats, fv):
     return charts
 
 def chart_payoff(rec, live):
-    """损益图：x轴=PSI20点位, y轴=基金市值(EUR)"""
+    """损益图：x轴=PSI20点位, y轴=基金市值(EUR), 显示混合配置"""
     fv, psi_now, ibex_now = live['fund_value'], live['psi'], live['ibex']
+    K_atm = rec['K']
+    K_90 = round(ibex_now * 0.90 / 50) * 50
+    p1 = bs_put(ibex_now, K_atm, 1.0)
+    p_90 = bs_put(ibex_now, K_90, 1.0)
+    # 推荐混合配置
+    mix_prem = round(p1*8 + p_90*20)
+    atm_prem = round(p1*16)
     psi_x = np.linspace(5000, 11000, 500)
     psi_ret = (psi_x - psi_now) / psi_now
     ibex_est = ibex_now * (1 + BETA_IBEX_PSI * psi_ret)
     fund_val = fv * (1 + BETA_FUND_PSI * psi_ret)
-    put_pay = np.maximum(rec['K'] - ibex_est, 0) * N_CONTRACTS
-    hedged = fund_val + put_pay - rec['total']
+    # 纯ATM×16
+    atm_pay = np.maximum(K_atm - ibex_est, 0) * 16
+    atm_hedged = fund_val + atm_pay - atm_prem
+    # 混合 ATM×8 + 90%OTM×20
+    mix_pay = np.maximum(K_atm - ibex_est, 0) * 8 + np.maximum(K_90 - ibex_est, 0) * 20
+    mix_hedged = fund_val + mix_pay - mix_prem
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=psi_x, y=fund_val, name='基金市值(不对冲)',
+    fig.add_trace(go.Scatter(x=psi_x, y=fund_val, name='不对冲',
         line=dict(color='#c62828',width=2.5,dash='dot'),
         hovertemplate='PSI20:%{x:,.0f}<br>基金:€%{y:,.0f}<extra></extra>'))
-    fig.add_trace(go.Scatter(x=psi_x, y=hedged, name='基金+Put(对冲后)',
+    fig.add_trace(go.Scatter(x=psi_x, y=atm_hedged, name=f'纯ATM×16 (€{atm_prem:,}/年)',
+        line=dict(color='#888',width=2,dash='dash'),
+        hovertemplate='PSI20:%{x:,.0f}<br>纯ATM:€%{y:,.0f}<extra></extra>'))
+    fig.add_trace(go.Scatter(x=psi_x, y=mix_hedged, name=f'ATM×8+OTM×20 [推荐] (€{mix_prem:,}/年)',
         line=dict(color='#2e7d32',width=3),
-        hovertemplate='PSI20:%{x:,.0f}<br>对冲后:€%{y:,.0f}<extra></extra>'))
+        hovertemplate='PSI20:%{x:,.0f}<br>混合:€%{y:,.0f}<extra></extra>'))
     fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
         annotation_text=f'当前€{fv:,}', annotation_position='top left', annotation_font=dict(size=10,color='gray'))
     fig.add_vline(x=psi_now, line_dash='dot', line_color='gray', opacity=0.4,
@@ -343,6 +364,9 @@ def chart_payoff(rec, live):
 def generate_html(fund_df, psi_df, res, live):
     df, events, strats, rec, options = res['df'], res['events'], res['strats'], res['rec'], res['options']
     psi_scenarios = res['psi_scenarios']
+    K_90 = res['K_90']
+    rec_prem = res['rec_prem']
+    K = rec['K']
     fv = live['fund_value']
     fund_nav = live['fund_nav']
     psi_now = live['psi']
@@ -404,20 +428,21 @@ def generate_html(fund_df, psi_df, res, live):
             <div class="chart-box" style="padding:8px"><div id="zoom_{i}" style="height:260px"></div></div>
           </div></div>"""
 
-    # Contract options table (show EUR payoff only, no circular coverage %)
+    # Contract options table — mixed-strike configs
     opt_rows = ''
-    for opt in options:
-        is_rec = opt['n'] == 16
+    for i, opt in enumerate(options):
+        is_rec = (i == 1)  # ATM×8 + 90%OTM×20 推荐
         st = ' style="background:#f0fff0;font-weight:600"' if is_rec else ''
         tag = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_rec else ''
-        s10, s20, s30 = opt['scenarios'][10], opt['scenarios'][20], opt['scenarios'][30]
+        s5, s10, s20, s30 = opt['scenarios'][5], opt['scenarios'][10], opt['scenarios'][20], opt['scenarios'][30]
         opt_rows += f'''<tr{st}>
           <td style="text-align:left">{opt['label']}{tag}<br><span style="font-size:10px;color:#888">{opt['desc']}</span></td>
           <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/年</span></td>
           <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/fv*100:.1f}%</span></td>
+          <td style="color:{'#2e7d32' if s5['payoff']>0 else '#ccc'}">&euro;{s5['payoff']:,}</td>
           <td style="color:#2e7d32;font-weight:600">&euro;{s10['payoff']:,}</td>
           <td style="color:#2e7d32;font-weight:600">&euro;{s20['payoff']:,}</td>
-          <td style="color:#2e7d32;font-weight:600">&euro;{s30['payoff']:,}</td>
+          <td style="color:#2e7d32;font-weight:700">&euro;{s30['payoff']:,}</td>
         </tr>'''
 
     # Cost table (rolling frequency)
@@ -584,21 +609,25 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 
 <div class="section">
-<h2>四、买多少张合约？</h2>
+<h2>四、合约配置：混合行权价策略</h2>
 <div class="alert a-info">
-  合约张数决定Put赔付金额。下表展示三种配置在不同IBEX跌幅下的<b>Put赔付金额</b>（不含保费扣除）：
+  <b>核心思路</b>：不必全买贵的ATM Put。用一部分预算买便宜的虚值OTM Put，张数更多，
+  大跌时赔付反而更高——同样的保费，换来更强的崩盘保护。
 </div>
 <table>
-  <tr><th style="text-align:left">配置</th><th>年保费</th><th>5年总保费</th><th>IBEX跌10%</th><th>IBEX跌20%</th><th>IBEX跌30%</th></tr>
+  <tr><th style="text-align:left">配置</th><th>年保费</th><th>5年总保费</th><th>IBEX跌5%</th><th>IBEX跌10%</th><th>IBEX跌20%</th><th>IBEX跌30%</th></tr>
   {opt_rows}
 </table>
+<div class="alert a-warn" style="font-size:13px">
+  <b>怎么读这张表</b>：<br>
+  &middot; <b>纯ATM ×16</b>：所有跌幅都有赔付，但大跌时赔付最少（因为只有16张）<br>
+  &middot; <b>ATM ×8 + 90%OTM ×20 [推荐]</b>：小跌仍有保护（8张ATM兜底），大跌赔付比纯ATM多33-60%<br>
+  &middot; <b>纯90%OTM ×24</b>：最省钱，但10%以内的跌幅完全不赔<br>
+  OTM行权价={K_90:,}点（IBEX当前90%），ATM行权价={K:,}点
+</div>
 <div class="alert a-bad">
-  <b>重要：Put赔付 &ne; 基金损失覆盖</b><br>
-  上表的赔付金额是IBEX维度的确定值。但基金的实际损失取决于PSI20和基金自身因素（R&sup2;=42%），
-  Put无法覆盖IBEX以外的58%风险。<br>
-  <b>实际覆盖率取决于场景</b>：在PSI20维度的估算中约为40-50%（见下方场景表），
-  而在2025年3-4月的真实回测中仅约5%（因"先涨后跌"导致行权价被甩开）。<br>
-  <b>这不是保险，是减震垫。</b>
+  <b>所有配置共同的局限</b>：Put赔付基于IBEX维度。基金实际损失取决于PSI20和基金自身因素（R&sup2;=42%），
+  Put无法覆盖IBEX以外58%的风险。在"先涨后跌"行情下，即使是ATM Put也可能因行权价被甩开而失效（Event #10、#11教训）。
 </div>
 </div>
 
@@ -616,14 +645,19 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="section">
 <h2>六、推荐方案</h2>
 <div class="rec">
-  <h3>{N_CONTRACTS}张 Mini IBEX35 12个月ATM Put，每年滚仓</h3>
+  <h3>ATM Put &times;8 + 90%OTM Put &times;20，12个月年滚 + 动态滚仓</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">行权价(IBEX)</div><div class="rv">{rec['K']:,}点</div><div style="font-size:10px;color:#888">MEFF标准行权价</div></div>
-    <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec['total']:,}</div><div style="font-size:10px;color:#888">Black-Scholes理论值</div></div>
-    <div class="rec-item"><div class="rl">年化占比</div><div class="rv">{rec['annual']:.2f}%</div></div>
-    <div class="rec-item"><div class="rl">操作频率</div><div class="rv">1次/年</div></div>
-    <div class="rec-item"><div class="rl">5年总保费</div><div class="rv">&euro;{rec['total']*5:,}</div></div>
+    <div class="rec-item"><div class="rl">ATM行权价</div><div class="rv">{rec['K']:,}点</div><div style="font-size:10px;color:#888">&times;8张</div></div>
+    <div class="rec-item"><div class="rl">OTM行权价</div><div class="rv">{K_90:,}点</div><div style="font-size:10px;color:#888">&times;20张（90% OTM）</div></div>
+    <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec_prem:,}</div><div style="font-size:10px;color:#888">BS理论值，{rec_prem/fv*100:.2f}%</div></div>
+    <div class="rec-item"><div class="rl">5年总保费</div><div class="rv">&euro;{rec_prem*5:,}</div></div>
+    <div class="rec-item"><div class="rl">vs 纯ATM</div><div class="rv">同成本，大跌多赔33-60%</div></div>
   </div>
+</div>
+<div class="alert a-info" style="font-size:13px">
+  <b>为什么混合配置更好</b>：同样~&euro;{rec_prem:,}/年预算，8张ATM保住小跌时的基本保护，
+  20张90%OTM在大跌时提供额外杠杆（单价仅ATM的40%，但张数多1.5倍）。
+  IBEX跌30%时赔付比纯ATM多<b>{round((options[1]['scenarios'][30]['payoff']/options[0]['scenarios'][30]['payoff']-1)*100)}%</b>。
 </div>
 
 <p style="margin:16px 0 8px;font-weight:700">如果PSI20跌到…你的基金会怎样？</p>
@@ -645,8 +679,9 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <h2>七、操作步骤</h2>
 <div class="steps"><ol>
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
-  <li><b>搜索合约</b>：在IBKR搜索"IBEX 35"，找Mini IBEX期权（乘数&euro;1/点），到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>（MEFF标准行权价，50点间距）。如果该行权价无报价，选最接近的可用行权价。</li>
-  <li><b>买入{N_CONTRACTS}张</b>：限价单，参考价约&euro;{rec['price']:,.0f}/张（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%），实际市价可能上浮10-30%。总计约&euro;{rec['total']:,}。</li>
+  <li><b>买第一腿——ATM Put &times;8</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>（ATM，50点间距）。参考价约&euro;{rec['price']:,.0f}/张，8张合计约&euro;{round(rec['price']*8):,}。</li>
+  <li><b>买第二腿——90%OTM Put &times;20</b>：同到期月，行权价<b>{K_90:,}</b>（90% OTM）。参考价约&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/张，20张合计约&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}。</li>
+  <li><b>总保费</b>约&euro;{rec_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%），实际市价可能上浮10-30%。</li>
   <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超15%（>{round(ibex_now*1.15):,}）时必须提前滚仓</b>——
   卖掉旧Put（已变深度虚值），买入新的ATM Put重设行权价。这能防止"先涨后跌"时Put变废纸（Event #10教训）。</li>
   <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
@@ -668,7 +703,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
     <li><b>这是减震垫，不是全额保险</b>：在理想线性假设下覆盖约46%的基金损失。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。</li>
-    <li><b>保费是确定支出</b>：每年&euro;{rec['total']:,}，5年不出事白花&euro;{rec['total']*5:,}（组合的{rec['total']*5/fv*100:.1f}%）。</li>
+    <li><b>保费是确定支出</b>：每年&euro;{rec_prem:,}，5年不出事白花&euro;{rec_prem*5:,}（组合的{rec_prem*5/fv*100:.1f}%）。</li>
     <li><b>R&sup2;=42%的根本限制</b>：IBEX只能解释基金42%的波动。基金可能因为葡萄牙本地原因（个股暴雷、流动性危机）大跌而IBEX无动于衷，此时Put完全无效。</li>
     <li><b>线性模型在极端行情下失真</b>：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。</li>
     <li><b>IV影响成本</b>：恐慌期Put更贵，尽量在平静期滚仓。</li>
@@ -679,10 +714,10 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="section">
 <h2>九、总结</h2>
 <div class="alert a-note" style="font-size:14px;line-height:1.9">
-  <b style="font-size:17px;color:#4a148c">{N_CONTRACTS}张 Mini IBEX35 12个月ATM Put + 动态滚仓</b><br>
-  <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。当IBEX跟跌且Put行权价仍为ATM时，可覆盖基金约40-50%的估算损失。<br>
+  <b style="font-size:17px;color:#4a148c">ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓</b><br>
+  <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。混合配置在大跌时赔付比纯ATM多33-60%，同时保留小跌基本保护。<br>
   <b>做不到的</b>：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。<br>
-  <b>成本</b>：年化{rec['annual']:.2f}%（&euro;{rec['total']:,}/年），5年约&euro;{rec['total']*5:,}，是确定的支出。<br>
+  <b>成本</b>：年化{rec_prem/fv*100:.2f}%（&euro;{rec_prem:,}/年），5年约&euro;{rec_prem*5:,}，是确定的支出。<br>
   <b>本质</b>：这是一个减震垫，不是全额保险。它降低了系统性暴跌中的最大亏损幅度，但不能保证你不亏钱。
 </div>
 <div class="alert a-info" style="margin-top:16px">
