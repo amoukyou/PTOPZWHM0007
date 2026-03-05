@@ -84,7 +84,7 @@ def bs_put(S, K, T, r=ECB_RATE, sigma=IBEX_IMPLIED_VOL):
     d2 = d1 - sigma*math.sqrt(T)
     return K*math.exp(-r*T)*norm_cdf(-d2) - S*norm_cdf(-d1)
 
-def load_data():
+def load_data(live=None):
     fund = pd.read_csv(os.path.join(DATA_DIR, 'PTOPZWHM0007_daily_2022-2026.csv'), parse_dates=['Date'])
     fund = fund.sort_values('Date').reset_index(drop=True)
     from datetime import datetime, timedelta
@@ -97,6 +97,16 @@ def load_data():
     psi.columns = [c[0] for c in psi.columns]
     psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
     psi['Date'] = psi['Date'].dt.normalize()
+    # 追加live数据到fund_df，确保事件检测覆盖最新交易日
+    if live and 'fund' in live and 'fund_date' in live:
+        live_dt = pd.Timestamp(live['fund_date'])
+        if fund['Date'].iloc[-1] < live_dt:
+            live_row = pd.DataFrame({'Date': [live_dt], 'Close': [live['fund']]})
+            # 补齐CSV中可能有的其他列
+            for col in fund.columns:
+                if col not in live_row.columns:
+                    live_row[col] = np.nan
+            fund = pd.concat([fund, live_row], ignore_index=True)
     return fund, ibex, psi
 
 def find_weekly_drops(df, threshold=-3.0):
@@ -173,7 +183,8 @@ def analyze(fund_df, ibex_df, psi_df, live):
             mtm, strike = get_put_mtm(s['positions'], ev['ibex_level'], idx)
             ev['strat'][k] = dict(mtm=mtm, strike=strike, cov=mtm/loss*100 if loss>0 else 0)
     # Recommendation (base: 16 contracts)
-    K = round(ibex_now); p1 = bs_put(ibex_now, K, 1.0)
+    K = round(ibex_now / 50) * 50  # MEFF标准行权价间距50点
+    p1 = bs_put(ibex_now, K, 1.0)
     rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/fv*100,2))
     # Contract count options for comparison
     options = []
@@ -595,8 +606,8 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="rec">
   <h3>{N_CONTRACTS}张 Mini IBEX35 12个月ATM Put，每年滚仓</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">行权价(IBEX)</div><div class="rv">{rec['K']:,}点</div></div>
-    <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec['total']:,}</div></div>
+    <div class="rec-item"><div class="rl">行权价(IBEX)</div><div class="rv">{rec['K']:,}点</div><div style="font-size:10px;color:#888">MEFF标准行权价</div></div>
+    <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec['total']:,}</div><div style="font-size:10px;color:#888">Black-Scholes理论值</div></div>
     <div class="rec-item"><div class="rl">年化占比</div><div class="rv">{rec['annual']:.2f}%</div></div>
     <div class="rec-item"><div class="rl">操作频率</div><div class="rv">1次/年</div></div>
     <div class="rec-item"><div class="rl">5年总保费</div><div class="rv">&euro;{rec['total']*5:,}</div></div>
@@ -622,8 +633,8 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <h2>七、操作步骤</h2>
 <div class="steps"><ol>
   <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
-  <li><b>搜索合约</b>：在IBKR搜索"IBEX 35"，找Mini IBEX期权（乘数&euro;1/点），到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>。</li>
-  <li><b>买入{N_CONTRACTS}张</b>：限价单，参考价约&euro;{rec['price']:,.0f}/张，总计约&euro;{rec['total']:,}。</li>
+  <li><b>搜索合约</b>：在IBKR搜索"IBEX 35"，找Mini IBEX期权（乘数&euro;1/点），到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>（MEFF标准行权价，50点间距）。如果该行权价无报价，选最接近的可用行权价。</li>
+  <li><b>买入{N_CONTRACTS}张</b>：限价单，参考价约&euro;{rec['price']:,.0f}/张（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%），实际市价可能上浮10-30%。总计约&euro;{rec['total']:,}。</li>
   <li><b>动态滚仓触发</b>（关键！）：不要死等12个月到期。<b>IBEX涨超15%（>{round(ibex_now*1.15):,}）时必须提前滚仓</b>——
   卖掉旧Put（已变深度虚值），买入新的ATM Put重设行权价。这能防止"先涨后跌"时Put变废纸（Event #10教训）。</li>
   <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
@@ -723,7 +734,7 @@ def main():
     print(f'  PSI20={psi_now:,.0f} IBEX={ibex_now:,.0f} ESTX={estx_now:,.0f}')
 
     print('加载历史数据...')
-    fund_df, ibex_df, psi_df = load_data()
+    fund_df, ibex_df, psi_df = load_data(live)
     print(f'  基金{len(fund_df)}条 IBEX{len(ibex_df)}条 PSI{len(psi_df)}条')
 
     print('分析...')
