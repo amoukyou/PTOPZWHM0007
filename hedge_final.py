@@ -28,16 +28,46 @@ ENTRY_DATE       = '2024-07-16'
 # ═══════════════════════════════════════════════
 
 def fetch_live_prices():
-    """获取基金NAV和三大指数最新收盘价"""
-    tickers = {'fund': '0P0001O8MU.F', 'psi': 'PSI20.LS', 'ibex': '^IBEX', 'estx': '^STOXX50E'}
+    """获取基金NAV(FT Markets) + 三大指数(yfinance)"""
+    import re, subprocess
     prices = {}
-    for key, sym in tickers.items():
+    # 1) 基金NAV从FT Markets抓取（比Yahoo更新更快）
+    try:
+        r = subprocess.run(['curl', '-s', '-H', 'User-Agent: Mozilla/5.0',
+            'https://markets.ft.com/data/funds/tearsheet/summary?s=PTOPZWHM0007:EUR'],
+            capture_output=True, text=True, timeout=15)
+        html = r.stdout
+        # Price: <span class="mod-ui-data-list__value">16.97</span>
+        m = re.search(r'Price \(EUR\)</span><span class="mod-ui-data-list__value">([0-9.]+)', html)
+        if m:
+            prices['fund'] = float(m.group(1))
+        # Date: "as of Mar 03 2026"
+        m2 = re.search(r'as of ([A-Z][a-z]{2} \d{2} \d{4})', html)
+        if m2:
+            from datetime import datetime as _dt
+            prices['fund_date'] = _dt.strptime(m2.group(1), '%b %d %Y').strftime('%Y-%m-%d')
+        prices['fund_src'] = 'FT Markets'
+    except Exception:
+        pass
+    # 2) 三大指数从yfinance
+    for key, sym in [('psi','PSI20.LS'), ('ibex','^IBEX'), ('estx','^STOXX50E')]:
         try:
             t = yf.Ticker(sym)
             h = t.history(period='5d')
             if len(h) > 0:
                 prices[key] = float(h['Close'].iloc[-1])
                 prices[key+'_date'] = h.index[-1].strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    # 3) Fallback: 如果FT没抓到，用Yahoo
+    if 'fund' not in prices:
+        try:
+            t = yf.Ticker('0P0001O8MU.F')
+            h = t.history(period='5d')
+            if len(h) > 0:
+                prices['fund'] = float(h['Close'].iloc[-1])
+                prices['fund_date'] = h.index[-1].strftime('%Y-%m-%d')
+                prices['fund_src'] = 'Yahoo Finance'
         except Exception:
             pass
     return prices
@@ -446,9 +476,9 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 
 <div class="data-bar">
   <div class="src">
-    数据来源：<b>Yahoo Finance</b><br>
+    数据来源：基金NAV &larr; <b>{live['fund_src']}</b> &middot; 指数 &larr; <b>Yahoo Finance</b><br>
     <span style="font-size:11px;color:#aaa">
-      基金NAV (0P0001O8MU.F): {live['fund_date']} &middot;
+      基金NAV: {live['fund_date']} &middot;
       PSI20: {live['psi_date']} &middot;
       IBEX35: {live['ibex_date']} &middot;
       ESTOXX50: {live['estx_date']}
@@ -646,13 +676,15 @@ def main():
     estx_now = prices.get('estx', 6138)
     fund_value = round(fund_nav * FUND_UNITS)
     gen_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+    fund_src = prices.get('fund_src', 'Yahoo Finance')
     live = dict(fund_nav=fund_nav, fund_value=fund_value, psi=psi_now,
-                ibex=ibex_now, estx=estx_now, gen_time=gen_time,
+                ibex=ibex_now, estx=estx_now, gen_time=gen_time, fund_src=fund_src,
                 fund_date=prices.get('fund_date','?'),
                 psi_date=prices.get('psi_date','?'),
                 ibex_date=prices.get('ibex_date','?'),
                 estx_date=prices.get('estx_date','?'))
-    print(f'  基金NAV=€{fund_nav:.2f} 市值=€{fund_value:,} PSI20={psi_now:,.0f} IBEX={ibex_now:,.0f} ESTX={estx_now:,.0f}')
+    print(f'  基金NAV=€{fund_nav:.2f}({fund_src}, {prices.get("fund_date","?")}) 市值=€{fund_value:,}')
+    print(f'  PSI20={psi_now:,.0f} IBEX={ibex_now:,.0f} ESTX={estx_now:,.0f}')
 
     print('加载历史数据...')
     fund_df, ibex_df, psi_df = load_data()
