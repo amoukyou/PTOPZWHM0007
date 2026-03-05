@@ -637,7 +637,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
       A: 混合 ATM+OTM<br><span style="font-size:11px;font-weight:400">小跌+大跌都保护</span>
     </button>
     <button class="plan-btn" id="btn-b" onclick="switchPlan('b')">
-      B: 纯OTM 省钱版<br><span style="font-size:11px;font-weight:400">只防崩盘，成本低40%</span>
+      B: 纯OTM 省钱版<br><span style="font-size:11px;font-weight:400">只防崩盘，成本低约25-40%</span>
     </button>
   </div>
 </div>
@@ -684,7 +684,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 
 <div class="section">
-<h2>二、历史10次急跌：IBEX全部同步</h2>
+<h2>二、历史{nt}次急跌：IBEX全部同步</h2>
 <div class="chart-box"><div id="c2" style="height:460px"></div></div>
 <p class="note-sm">图中绿色编号标记对应下表中的10次急跌事件。点击表格行查看放大详情。</p>
 
@@ -841,10 +841,10 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   </div>
 </div>
 <div class="alert a-warn" style="font-size:13px">
-  <b>为什么是24张？</b>用急跌时的条件Beta（实证平均{avg_crash_ratio}）替代全样本Beta={BETA_FUND_IBEX}，
-  IBEX等效敞口=&euro;{fv:,}&times;{avg_crash_ratio}=&euro;{round(fv*avg_crash_ratio):,}，
-  除以IBEX点位&divide;{round(ibex_now):,}&asymp;<b>{round(fv*avg_crash_ratio/ibex_now)}张</b>。
-  取整后用实证比率定张数，比全样本Beta的16张多50%，在急跌时覆盖更充分。<br><br>
+  <b>为什么是24张？</b>条件Beta（实证平均{avg_crash_ratio}）计算出基准约{round(fv*avg_crash_ratio/ibex_now)}张，
+  但急跌比率波动范围大（{min(crash_ratios):.2f}~{max(crash_ratios):.2f}），最差一次达{max(crash_ratios):.3f}。
+  取24张是在基准{round(fv*avg_crash_ratio/ibex_now)}张之上加约{round((24/round(fv*avg_crash_ratio/ibex_now)-1)*100)}%的安全边际，
+  以应对急跌比率高于平均值的情况。<br><br>
   <b>方案B的逻辑</b>：如果你认为小幅回调（5-10%）可以承受，只想防范崩盘式暴跌（>10%），
   那么全部买便宜的虚值Put，省下来的保费本身就是一种保护（少花钱=少损失确定成本）。<br>
   <b>适合</b>：风险承受力较高、不想每年花太多保费的投资者。<br>
@@ -896,8 +896,12 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <li><b>到期前1个月滚仓</b>：如果IBEX没有大涨，正常到期前卖旧买新，周而复始。</li>
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
-  动态滚仓会增加交易频率和额外保费支出（每次滚仓损失旧Put的剩余时间价值），但能确保行权价始终贴近当前市场，
-  避免保护失效。10%触发阈值下预计每年触发1-3次额外滚仓。
+  <b>动态滚仓的隐性成本</b>：每次滚仓损失旧Put的剩余时间价值（估计为原价的30-60%），同时以更高行权价买入新Put。
+  假设每年触发2次额外滚仓，每次损失旧Put约40%的时间价值：<br>
+  &middot; 方案A额外成本 &asymp; &euro;{rec_prem:,} &times; 40% &times; 2 = <b>&euro;{round(rec_prem*0.4*2):,}/年</b><br>
+  &middot; 方案A真实年化总成本可能达 <b>&euro;{rec_prem + round(rec_prem*0.4*2):,}</b>（BS理论值 + 滚仓损耗，未含skew上浮）<br>
+  这是整个方案中最大的未量化风险。降低触发阈值能提高保护有效性，但也增加滚仓频率和成本。
+  10%触发阈值下预计每年触发1-3次额外滚仓。
 </div>
 </div>
 </div>
@@ -918,7 +922,10 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </ol></div>
 <div class="alert a-warn" style="font-size:13px">
   <b>方案B注意</b>：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。
-  如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。
+  如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。<br><br>
+  <b>动态滚仓隐性成本</b>：与方案A同理，每次额外滚仓损失旧Put约40%的时间价值。
+  假设每年2次：额外成本 &asymp; &euro;{planb_prem:,} &times; 40% &times; 2 = <b>&euro;{round(planb_prem*0.4*2):,}/年</b>。
+  方案B真实年化总成本可能达 <b>&euro;{planb_prem + round(planb_prem*0.4*2):,}</b>（含skew后更高）。
 </div>
 </div>
 </div>
@@ -933,7 +940,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
-    <li><b>这是减震垫，不是全额保险</b>：在理想线性假设下覆盖约46%的基金损失。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。</li>
+    <li><b>这是减震垫，不是全额保险</b>：方案A的覆盖率随跌幅递增（小跌~24%，大跌可达~57%），方案B仅在IBEX跌超10%后才启动赔付。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。</li>
     <li><b>保费是确定支出</b>：每年&euro;{rec_prem:,}（方案A），5年不出事白花&euro;{rec_prem*5:,}（组合的{rec_prem*5/fv*100:.1f}%）。</li>
     <li><b>R&sup2;=42%的根本限制</b>：IBEX只能解释基金42%的波动。基金可能因为葡萄牙本地原因（个股暴雷、流动性危机）大跌而IBEX无动于衷，此时Put完全无效。</li>
     <li><b>条件Beta高于无条件Beta</b>：全样本Beta={BETA_FUND_IBEX}用于计算合约数，但{len(crash_ratios)}次历史急跌中实际比率平均{avg_crash_ratio}（高{round((avg_crash_ratio/BETA_FUND_IBEX-1)*100)}%）。
