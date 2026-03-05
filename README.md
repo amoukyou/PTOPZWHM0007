@@ -2,43 +2,50 @@
 
 **Optimize Portugal Golden Opportunities Fund**（ISIN: PTOPZWHM0007）的下行风险对冲方案。
 
-## 在线查看报告
+## 在线查看
 
-**[点击查看完整对冲报告（hedge_final.html）](https://htmlpreview.github.io/?https://github.com/amoukyou/PTOPZWHM0007/blob/main/hedge_final.html)**
+**[GitHub Pages 报告](https://amoukyou.github.io/PTOPZWHM0007/)**
 
-> 如果上面的链接加载慢或图表不显示，请下载 `hedge_final.html` 到本地用浏览器打开。
+> 备用：下载 `hedge_final.html` 到本地用浏览器打开。报告每个工作日 UTC 18:30 自动更新（GitHub Actions）。
 
 ## 背景
 
-- 持仓：€507,000买入，当前市值€651,000（+28%）
-- 买入日：2024年7月16日
-- 计划持有5年
+- 持仓：€507,000 买入，当前市值约 €644,000（+27%）
+- 买入日：2024年7月16日，计划持有5年
 - 担忧：俄乌停战、欧盟加息、美欧关税等全欧系统性风险导致基金大跌
+- PSI20 无可用期权 → 用 IBEX35 Put（MEFF Mini 合约）作为替代对冲工具
 
-## 核心结论
+## 两个方案（页面顶部可切换）
 
-| | 原方案（已否决） | 修正方案（推荐） |
+| | 方案A：混合 ATM+OTM | 方案B：纯OTM省钱版 |
 |---|---|---|
-| 策略 | 21个月 IBEX35 95% OTM Put | **12个月 IBEX35 ATM Put，年滚** |
-| 问题 | 牛市中行权价被甩开，25次回测全部归零 | 行权价每年刷新，不怕牛市漂移 |
-| 年化成本 | ~0.9% | ~2.4% |
-| 操作频率 | 一次买入不用管 | 每年滚仓一次 |
-| 5年总保费 | ~€19,000（但完全无效） | ~€83,000（有效保护） |
+| 合约配置 | ATM Put ×8 + 90%OTM Put ×20 | 90%OTM Put ×24 |
+| 年保费（BS理论值） | ~€16,700（2.6%） | ~€10,000（1.6%） |
+| 小跌保护（IBEX -5%） | 有（8张ATM兜底） | 无 |
+| 大跌赔付（IBEX -30%） | ~€111,000 | ~€83,000 |
+| 适合 | 任何级别下跌都想有保护 | 只防崩盘，接受小跌裸奔 |
+
+> 注意：实际成本受 IV skew 影响，OTM Put 真实价格可能高于 BS 理论值 30-50%。动态滚仓（IBEX涨超10%即触发）会产生额外成本。
+
+## 报告内容
+
+1. **持仓概况** — 基金NAV、PSI20、IBEX35 实时走势（自动抓取）
+2. **历史急跌分析** — 11次急跌事件逐一回测，含 IBEX 同步性验证
+3. **对冲链路与Beta** — 含条件Beta实证分析（急跌时敏感度比全样本高~25%）
+4. **混合行权价策略** — 4种配置对比（纯ATM/混合/进取/纯OTM）
+5. **推荐方案** — A/B切换，含PSI20场景表和损益图
+6. **操作步骤** — IBKR下单指引，含 skew 和滚仓成本警告
+7. **局限性** — Event #10/11 教训、R²=42%、条件Beta、滚仓隐性成本
 
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `hedge_final.py` | **主文件** — 生成完整对冲报告（v4），含5张交互图 |
-| `hedge_final.html` | 生成的报告网页，可直接浏览器打开 |
-| `hedge_report.py` | 早期报告v1（已弃用） |
-| `hedge_review.py` | 早期报告v2（已弃用） |
-| `fund_chart.py` | 基金走势图 + 多品种相关性分析 |
-| `hedge_analysis.py` | 做空IBEX35对冲分析（固定/滚动Beta） |
-| `put_hedge_analysis.py` | Put期权Black-Scholes定价详细计算 |
+| `hedge_final.py` | **主文件（v18）** — 生成完整报告，含实时数据抓取和交互图表 |
+| `hedge_final.html` | 生成的报告网页 |
+| `docs/index.html` | GitHub Pages 副本（自动同步） |
+| `.github/workflows/update-report.yml` | 每日自动更新（工作日 UTC 18:30） |
 | `PTOPZWHM0007_daily_*.csv` | 基金NAV历史数据 |
-| `IBEX35_daily_2024-2026.csv` | IBEX35指数数据 |
-| `开发日志.md` | 项目开发过程记录 |
 
 ## 运行
 
@@ -47,4 +54,4 @@ pip install yfinance pandas numpy plotly
 python3 hedge_final.py
 ```
 
-会自动下载最新IBEX数据，生成 `hedge_final.html` 并打开。
+自动抓取最新基金NAV（FT Markets）和指数数据（Yahoo Finance），生成 `hedge_final.html` 并打开。
