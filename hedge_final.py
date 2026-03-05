@@ -211,6 +211,11 @@ def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
     m = pd.merge(fund_df[fund_df['Date']>=e][['Date','Close']], psi_df[psi_df['Date']>=e], on='Date', how='inner')
     m = pd.merge(m, ibex_df[ibex_df['Date']>=e], on='Date', how='inner')
     rf, rp, ri = m['Close'].iloc[0], m['psi'].iloc[0], m['ibex'].iloc[0]
+    # Append live prices as latest data point (may be newer than CSV)
+    live_date = pd.Timestamp(live.get('fund_date', live.get('psi_date', m['Date'].iloc[-1])))
+    if live_date > m['Date'].iloc[-1]:
+        live_row = pd.DataFrame([{'Date': live_date, 'Close': live['fund_nav'], 'psi': live['psi'], 'ibex': live['ibex']}])
+        m = pd.concat([m, live_row], ignore_index=True)
     fund_pct = (m['Close']/rf-1)*100
     psi_pct = (m['psi']/rp-1)*100
     ibex_pct = (m['ibex']/ri-1)*100
@@ -219,12 +224,12 @@ def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
     fig.add_trace(go.Scatter(x=m['Date'], y=psi_pct, name='PSI20', line=dict(color='#ff7f0e',width=2,dash='dot')))
     fig.add_trace(go.Scatter(x=m['Date'], y=ibex_pct, name='IBEX35', line=dict(color='#e65100',width=2,dash='dash')))
     fig.add_hline(y=0, line_dash='dot', line_color='gray', opacity=0.3)
-    # Endpoint annotations with live prices
+    # Endpoint annotations with live prices (use actual computed %)
     last_date = m['Date'].iloc[-1]
-    for val, label, color, price_str in [
-        (fund_pct.iloc[-1], '基金', '#1565c0', f'NAV €{live["fund_nav"]:.2f}'),
-        (psi_pct.iloc[-1], 'PSI20', '#ff7f0e', f'{live["psi"]:,.0f}'),
-        (ibex_pct.iloc[-1], 'IBEX', '#e65100', f'{live["ibex"]:,.0f}'),
+    for val, color, price_str in [
+        (fund_pct.iloc[-1], '#1565c0', f'NAV €{live["fund_nav"]:.2f}'),
+        (psi_pct.iloc[-1], '#ff7f0e', f'{live["psi"]:,.0f}'),
+        (ibex_pct.iloc[-1], '#e65100', f'{live["ibex"]:,.0f}'),
     ]:
         fig.add_annotation(x=last_date, y=val, xanchor='left', text=f' {price_str} ({val:+.1f}%)',
             showarrow=False, font=dict(size=10, color=color, weight='bold'),
