@@ -358,7 +358,7 @@ def generate_html(fund_df, psi_df, res, live):
         loss = ev.get('fund_loss', abs(fv*ev['fund_chg']/100))
         detail = ''
         if ev['in_hold'] and ev['strat']:
-            detail = '<table style="font-size:13px;margin-top:12px"><tr><th style="text-align:left">策略</th><th>行权价</th><th>Put赚了</th><th>净亏</th><th>覆盖率</th></tr>'
+            detail = '<table style="font-size:13px;margin-top:12px"><tr><th style="text-align:left">策略</th><th>行权价<br><span style="font-weight:400;font-size:10px;color:#888">（模拟中的历史值）</span></th><th>Put赚了</th><th>净亏</th><th>覆盖率</th></tr>'
             for k, lab in [('12M','12月ATM年滚'),('6M','6月ATM半年滚'),('3M','3月ATM季滚')]:
                 r = ev['strat'].get(k,{})
                 m, st, c = r.get('mtm',0), r.get('strike',0), r.get('cov',0)
@@ -610,7 +610,8 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </table>
 <div class="alert a-warn" style="font-size:13px">
   <b>线性模型局限</b>：上表覆盖率恒定约46%，因为模型假设损失和赔付同比例放大（纯线性）。
-  现实中极端行情下Beta会漂移、尾部相关性会变化，实际覆盖率可能高于或低于此值。<br>
+  现实中极端行情下Beta会漂移、尾部相关性会变化，实际覆盖率可能高于或低于此值。
+  实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时IBEX与PSI20同步性更强，覆盖率可能<b>高于</b>此估计。<br>
   <b>更重要的是</b>：此表假设Put行权价在事件发生时仍为ATM。如果IBEX在持有期内先涨后跌（如Event #10），
   行权价早已变成深度虚值，实际覆盖率可能远低于46%。见下方"局限性"详细分析。
 </div>
@@ -637,7 +638,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <h2>八、局限性（必读）</h2>
 <div class="alert a-bad">
   <b>Event #10 教训：年度滚仓的致命缺陷</b><br>
-  2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在买入时的IBEX水平（约11,090点），
+  2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在2024年7月买入时的IBEX水平（约11,090点，注意：这是历史回测值，当前推荐行权价为{rec['K']:,}点），
   到事件发生时IBEX已涨到13,484点，即使跌到11,786点仍在行权价<b>之上</b>——Put几乎是废纸，覆盖仅约5%。<br><br>
   <b>结论</b>：固定年度滚仓在"先涨后跌"行情下保护形同虚设。这就是为什么操作步骤中加入了<b>动态滚仓触发</b>（IBEX涨超15%即提前滚仓重设行权价）。
 </div>
