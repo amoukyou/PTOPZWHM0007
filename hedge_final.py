@@ -812,12 +812,15 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #388e3c">
   <b style="font-size:16px">如果PSI20跌回买入时的{es['psi_target']:,}点？（方案A）</b><br>
   <span style="font-size:13px;color:#888">PSI20从当前跌{es['psi_drop_pct']}%，IBEX估计跌到{es['ibex_est']:,}点（Beta换算，非等比回落）</span><br><br>
-  <span style="display:inline-block;width:140px;color:#888">不对冲：</span>
-  &euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，浮盈保住<b>{es['no_hedge_kept']}%</b><br>
-  <span style="display:inline-block;width:140px;color:#2e7d32;font-weight:700">方案A对冲后：</span>
-  &euro;{fv:,} &rarr; <b style="color:#2e7d32">&euro;{es['pa_net']:,}</b>，
-  Put赔付<b style="color:#2e7d32">+&euro;{es['pa_pay']:,}</b>，浮盈保住<b style="color:#2e7d32">{es['pa_kept']}%</b><br>
-  <span style="font-size:12px;color:#888">当前浮盈 &euro;{es['gain_now']:,}，买入成本 &euro;{INITIAL_INV:,}</span>
+  <b>不对冲：</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，亏损&euro;{es['fund_loss']:,}，浮盈保住<b>{es['no_hedge_kept']}%</b><br><br>
+  <b style="color:#2e7d32">方案A对冲后：</b><br>
+  <span style="display:inline-block;width:16px"></span>基金市值 <b>&euro;{es['fund_est']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>+ Put赔付 <b style="color:#2e7d32">+&euro;{es['pa_pay']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; 年保费 <b style="color:#c62828">&minus;&euro;{rec_prem:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>= 组合净值 <b style="color:#2e7d32;font-size:17px">&euro;{es['pa_net']:,}</b>
+  <span style="font-size:13px;color:#888">（vs 买入成本&euro;{INITIAL_INV:,}）</span><br>
+  <span style="display:inline-block;width:16px"></span><b style="color:#2e7d32">浮盈保住{es['pa_kept']}%</b>
+  <span style="font-size:13px;color:#888">（当前浮盈&euro;{es['gain_now']:,}，对冲后仍盈利&euro;{es['pa_net']-INITIAL_INV:,}）</span>
 </div>
 </div>
 </div>
@@ -857,13 +860,16 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #e65100;background:#fff3e0;border-left:5px solid #e65100">
   <b style="font-size:16px;color:#e65100">如果PSI20跌回买入时的{es['psi_target']:,}点？（方案B）</b><br>
   <span style="font-size:13px;color:#888">PSI20从当前跌{es['psi_drop_pct']}%，IBEX估计跌到{es['ibex_est']:,}点（Beta换算，非等比回落）</span><br><br>
-  <span style="display:inline-block;width:140px;color:#888">不对冲：</span>
-  &euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，浮盈保住<b>{es['no_hedge_kept']}%</b><br>
-  <span style="display:inline-block;width:140px;color:#e65100;font-weight:700">方案B对冲后：</span>
-  &euro;{fv:,} &rarr; <b style="color:#e65100">&euro;{es['pb_net']:,}</b>，
-  Put赔付<b style="color:#e65100">+&euro;{es['pb_pay']:,}</b>，浮盈保住<b style="color:#e65100">{es['pb_kept']}%</b><br>
-  <span style="font-size:12px;color:#888">当前浮盈 &euro;{es['gain_now']:,}，买入成本 &euro;{INITIAL_INV:,}。
-  方案A同场景下保住浮盈{es['pa_kept']}%，多保{es['pa_kept']-es['pb_kept']}个百分点，但每年多花&euro;{rec_prem-planb_prem:,}保费。</span>
+  <b>不对冲：</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，亏损&euro;{es['fund_loss']:,}，浮盈保住<b>{es['no_hedge_kept']}%</b><br><br>
+  <b style="color:#e65100">方案B对冲后：</b><br>
+  <span style="display:inline-block;width:16px"></span>基金市值 <b>&euro;{es['fund_est']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>+ Put赔付 <b style="color:#2e7d32">+&euro;{es['pb_pay']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; 年保费 <b style="color:#c62828">&minus;&euro;{planb_prem:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>= 组合净值 <b style="color:#e65100;font-size:17px">&euro;{es['pb_net']:,}</b>
+  <span style="font-size:13px;color:#888">（vs 买入成本&euro;{INITIAL_INV:,}）</span><br>
+  <span style="display:inline-block;width:16px"></span><b style="color:#e65100">浮盈保住{es['pb_kept']}%</b>
+  <span style="font-size:13px;color:#888">（当前浮盈&euro;{es['gain_now']:,}，对冲后仍盈利&euro;{es['pb_net']-INITIAL_INV:,}）</span><br><br>
+  <span style="font-size:13px;color:#888">对比方案A：保住浮盈{es['pa_kept']}%，多保{es['pa_kept']-es['pb_kept']}个百分点，但每年多花&euro;{rec_prem-planb_prem:,}保费。</span>
 </div>
 </div>
 </div>
