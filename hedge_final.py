@@ -54,11 +54,13 @@ def bs_put(S, K, T, r=ECB_RATE, sigma=IBEX_IMPLIED_VOL):
 def load_data():
     fund = pd.read_csv(os.path.join(DATA_DIR, 'PTOPZWHM0007_daily_2022-2026.csv'), parse_dates=['Date'])
     fund = fund.sort_values('Date').reset_index(drop=True)
-    ibex = yf.download('^IBEX', start='2022-01-01', end='2026-03-06', progress=False)
+    from datetime import datetime, timedelta
+    end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+    ibex = yf.download('^IBEX', start='2022-01-01', end=end_date, progress=False)
     ibex.columns = [c[0] for c in ibex.columns]
     ibex = ibex.reset_index()[['Date','Close']].rename(columns={'Close':'ibex'})
     ibex['Date'] = ibex['Date'].dt.normalize()
-    psi = yf.download('PSI20.LS', start='2022-01-01', end='2026-03-06', progress=False)
+    psi = yf.download('PSI20.LS', start='2022-01-01', end=end_date, progress=False)
     psi.columns = [c[0] for c in psi.columns]
     psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
     psi['Date'] = psi['Date'].dt.normalize()
@@ -174,16 +176,31 @@ def analyze(fund_df, ibex_df, psi_df, live):
                 options=options, psi_scenarios=psi_scenarios)
 
 # ─── Charts ──────────────────────────────
-def chart_fund_psi(fund_df, psi_df):
+def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
     e = pd.Timestamp(ENTRY_DATE)
     m = pd.merge(fund_df[fund_df['Date']>=e][['Date','Close']], psi_df[psi_df['Date']>=e], on='Date', how='inner')
-    rf, rp = m['Close'].iloc[0], m['psi'].iloc[0]
+    m = pd.merge(m, ibex_df[ibex_df['Date']>=e], on='Date', how='inner')
+    rf, rp, ri = m['Close'].iloc[0], m['psi'].iloc[0], m['ibex'].iloc[0]
+    fund_pct = (m['Close']/rf-1)*100
+    psi_pct = (m['psi']/rp-1)*100
+    ibex_pct = (m['ibex']/ri-1)*100
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=m['Date'], y=(m['Close']/rf-1)*100, name='基金', line=dict(color='#1565c0',width=2.5)))
-    fig.add_trace(go.Scatter(x=m['Date'], y=(m['psi']/rp-1)*100, name='PSI20', line=dict(color='#ff7f0e',width=2,dash='dot')))
+    fig.add_trace(go.Scatter(x=m['Date'], y=fund_pct, name='基金', line=dict(color='#1565c0',width=2.5)))
+    fig.add_trace(go.Scatter(x=m['Date'], y=psi_pct, name='PSI20', line=dict(color='#ff7f0e',width=2,dash='dot')))
+    fig.add_trace(go.Scatter(x=m['Date'], y=ibex_pct, name='IBEX35', line=dict(color='#e65100',width=2,dash='dash')))
     fig.add_hline(y=0, line_dash='dot', line_color='gray', opacity=0.3)
-    fig.update_layout(template='plotly_white', height=300, yaxis_title='相对买入日涨跌(%)',
-        legend=dict(x=0.01,y=0.99), margin=dict(t=10,b=30,l=60,r=20), hovermode='x unified')
+    # Endpoint annotations with live prices
+    last_date = m['Date'].iloc[-1]
+    for val, label, color, price_str in [
+        (fund_pct.iloc[-1], '基金', '#1565c0', f'NAV €{live["fund_nav"]:.2f}'),
+        (psi_pct.iloc[-1], 'PSI20', '#ff7f0e', f'{live["psi"]:,.0f}'),
+        (ibex_pct.iloc[-1], 'IBEX', '#e65100', f'{live["ibex"]:,.0f}'),
+    ]:
+        fig.add_annotation(x=last_date, y=val, xanchor='left', text=f' {price_str} ({val:+.1f}%)',
+            showarrow=False, font=dict(size=10, color=color, weight='bold'),
+            xshift=5, bgcolor='rgba(255,255,255,0.85)', borderpad=2)
+    fig.update_layout(template='plotly_white', height=340, yaxis_title='相对买入日涨跌(%)',
+        legend=dict(x=0.01,y=0.99), margin=dict(t=10,b=30,l=60,r=100), hovermode='x unified')
     return fig.to_json()
 
 def chart_fund_ibex(df, events):
@@ -278,7 +295,7 @@ def generate_html(fund_df, psi_df, res, live):
     estx_now = live['estx']
     data_date = live.get('data_date', '?')
 
-    c1 = chart_fund_psi(fund_df, psi_df)
+    c1 = chart_fund_psi_ibex(fund_df, psi_df, res['df'][['Date','ibex']], live)
     c2 = chart_fund_ibex(df, events)
     c5 = chart_payoff(rec, live)
     zooms = make_zoom_charts(df, events, strats, fv)
@@ -419,10 +436,25 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 .tab-panel.active{{display:block}}
 @media(max-width:700px){{.cards{{grid-template-columns:1fr 1fr}}.two-col{{grid-template-columns:1fr}}
 .chain{{flex-direction:column}}.chain-arrow{{transform:rotate(90deg)}}}}
+.data-bar{{background:white;border-radius:10px;padding:12px 16px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.07);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:13px}}
+.data-bar .src{{color:#888}}.data-bar .src b{{color:#1a237e}}
+.data-bar .timer{{color:#e65100;font-weight:600}}
 </style></head><body><div class="page">
 
 <h1>葡萄牙基金对冲方案</h1>
-<p class="meta">Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007) &middot; 数据更新：{data_date}</p>
+<p class="meta">Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007)</p>
+
+<div class="data-bar">
+  <div class="src">
+    数据来源：<b>Yahoo Finance</b>（基金NAV: 0P0001O8MU.F, PSI20, IBEX35, ESTOXX50）<br>
+    <span style="font-size:11px;color:#aaa">报告为静态快照，重新运行 <code>python3 hedge_final.py</code> 即可刷新全部数据</span>
+  </div>
+  <div>
+    <div style="font-size:11px;color:#888;text-align:right">生成于</div>
+    <div style="font-size:15px;font-weight:800;color:#1a237e">{data_date}</div>
+    <div class="timer" id="timer"></div>
+  </div>
+</div>
 
 <div class="section">
 <h2>一、持仓概况</h2>
@@ -432,11 +464,11 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
   <div class="card purple"><div class="lbl">浮盈</div><div class="val">{"+" if fv>=INITIAL_INV else ""}&euro;{fv-INITIAL_INV:,}</div><div class="sub">{fg:+.1f}%</div></div>
   <div class="card orange"><div class="lbl">PSI20</div><div class="val">{psi_now:,.0f}</div><div class="sub">买入时{PSI20_ENTRY_ACT:,}</div></div>
 </div>
-<div style="display:flex;gap:10px;margin-bottom:12px;font-size:12px;color:#888">
+<div style="display:flex;gap:14px;margin-bottom:12px;font-size:12px;color:#888">
   <span>IBEX35: <b style="color:#e65100">{ibex_now:,.0f}</b></span>
   <span>ESTOXX50: <b style="color:#6a1b9a">{estx_now:,.0f}</b></span>
 </div>
-<div class="chart-box"><div id="c1" style="height:300px"></div></div>
+<div class="chart-box"><div id="c1" style="height:340px"></div></div>
 <div class="alert a-warn">
   <b>担忧：</b>俄乌停战、欧盟加息、美欧关税等全欧系统性事件导致大跌。计划持有5年，想买保险。
 </div>
@@ -576,6 +608,22 @@ function showTab(i){{
   document.querySelectorAll('table tr[onclick]').forEach((r,j)=>r.style.outline=j===i?'2px solid #1a237e':'none');
 }}
 if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});document.getElementById('zoom_0').dataset.r='1'}}
+// Countdown since generation
+(function(){{
+  var gen=new Date('{data_date}T18:00:00');
+  var el=document.getElementById('timer');
+  function tick(){{
+    var now=new Date();var d=Math.floor((now-gen)/1000);
+    if(d<0)d=0;
+    var dd=Math.floor(d/86400),hh=Math.floor(d%86400/3600),mm=Math.floor(d%3600/60);
+    var parts=[];
+    if(dd>0)parts.push(dd+'天');
+    parts.push(hh+'时'+mm+'分');
+    el.textContent='已过 '+parts.join('')+'，建议每周刷新一次';
+    if(dd>=7)el.style.color='#c62828';
+  }}
+  tick();setInterval(tick,60000);
+}})();
 </script></body></html>"""
 
     html = html.replace('__C1__',c1).replace('__C2__',c2).replace('__C5__',c5)
