@@ -1,8 +1,7 @@
 """
-葡萄牙基金对冲方案 — 完整报告 v7
-- 10次事件全部可点击放大
-- 修正合约规格(Mini IBEX)、脱钩次数、操作代码
-- 精简废话
+葡萄牙基金对冲方案 — 完整报告 v8
+- 删除远期Put段落(已无意义)
+- 新增"买多少张合约"对比(16/24/38张,含场景覆盖率)
 """
 
 import os, sys, math
@@ -10,7 +9,6 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
 sys.stdout.reconfigure(encoding='utf-8')
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -122,18 +120,28 @@ def analyze(fund_df, ibex_df, psi_df):
         for k, s in strats.items():
             mtm, strike = get_put_mtm(s['positions'], ev['ibex_level'], idx)
             ev['strat'][k] = dict(mtm=mtm, strike=strike, cov=mtm/loss*100 if loss>0 else 0)
-    # 21M backtest
-    bt = []
-    for i in range(0, max(1,len(df)-441), 21):
-        ib = df['ibex'].iloc[i]; K = ib*0.95
-        ie = df['ibex'].iloc[min(i+441, len(df)-1)]
-        bt.append(dict(date=str(df['Date'].iloc[i].date()), ib=ib, K=K, ie=ie, pay=max(K-ie,0)*N_CONTRACTS))
-    # Recommendation
-    K = round(IBEX_CURRENT); p = bs_put(IBEX_CURRENT, K, 1.0); tot = round(p*N_CONTRACTS)
-    rec = dict(K=K, price=round(p,1), total=tot, annual=round(tot/FUND_VALUE*100,2))
-    K_old = round(IBEX_CURRENT*0.95)
-    return dict(df=df, df_h=df_h, events=events, strats=strats, bt=bt, rec=rec,
-                rec_old=dict(K=K_old, total=round(bs_put(IBEX_CURRENT,K_old,21/12)*N_CONTRACTS)))
+    # Recommendation (base: 16 contracts)
+    K = round(IBEX_CURRENT); p1 = bs_put(IBEX_CURRENT, K, 1.0)
+    rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/FUND_VALUE*100,2))
+    # Contract count options for comparison
+    options = []
+    for n, label, desc in [
+        (16, '16张 (Beta调整)', f'覆盖Beta敞口€{round(FUND_VALUE*BETA_FUND_IBEX):,}'),
+        (24, '24张 (1.5×Beta)', '在Beta基础上加50%安全垫'),
+        (38, '38张 (全额名义)', f'覆盖基金全额€{FUND_VALUE:,}'),
+    ]:
+        prem = round(p1 * n)
+        # Payoff at different IBEX drop levels
+        scenarios = {}
+        for drop_pct in [10, 15, 20, 30]:
+            ibex_drop = round(IBEX_CURRENT * (1 - drop_pct/100))
+            put_payoff = max(K - ibex_drop, 0) * n
+            fund_loss = abs(FUND_VALUE * BETA_FUND_IBEX * drop_pct / 100)
+            cov = put_payoff / fund_loss * 100 if fund_loss > 0 else 0
+            scenarios[drop_pct] = dict(payoff=put_payoff, fund_loss=round(fund_loss), cov=round(cov))
+        options.append(dict(n=n, label=label, desc=desc, prem=prem,
+                            annual_pct=round(prem/FUND_VALUE*100, 2), five_yr=prem*5, scenarios=scenarios))
+    return dict(df=df, df_h=df_h, events=events, strats=strats, rec=rec, options=options)
 
 # ─── Charts ──────────────────────────────
 def chart_fund_psi(fund_df, psi_df):
@@ -163,22 +171,6 @@ def chart_fund_ibex(df, events):
         font=dict(size=10, color='#c62828'))
     fig.update_layout(template='plotly_white', height=460, yaxis_title='相对2022年初涨跌(%)',
         legend=dict(x=0.01,y=0.99), margin=dict(t=10,b=30,l=60,r=20), hovermode='x unified')
-    return fig.to_json()
-
-def chart_backtest(bt):
-    d = [b['date'] for b in bt]
-    fig = make_subplots(rows=2, cols=1, row_heights=[0.6,0.4], shared_xaxes=True, vertical_spacing=0.08)
-    fig.add_trace(go.Scatter(x=d,y=[b['ib'] for b in bt],name='买入时IBEX',mode='lines+markers',
-        marker=dict(size=4),line=dict(color='#1565c0',width=2)),row=1,col=1)
-    fig.add_trace(go.Scatter(x=d,y=[b['K'] for b in bt],name='行权价(95%)',mode='lines+markers',
-        marker=dict(size=4),line=dict(color='#e65100',width=2,dash='dash')),row=1,col=1)
-    fig.add_trace(go.Scatter(x=d,y=[b['ie'] for b in bt],name='到期时IBEX',mode='lines+markers',
-        marker=dict(size=4),line=dict(color='#2e7d32',width=2)),row=1,col=1)
-    fig.add_trace(go.Bar(x=d,y=[b['pay'] for b in bt],name='Put赔付',
-        marker_color=['#c62828' if b['pay']==0 else '#2e7d32' for b in bt]),row=2,col=1)
-    fig.update_layout(template='plotly_white',height=400,margin=dict(t=10,b=30,l=60,r=20),legend=dict(x=0.01,y=0.99))
-    fig.update_yaxes(title_text='IBEX点位',row=1,col=1)
-    fig.update_yaxes(title_text='赔付(EUR)',row=2,col=1)
     return fig.to_json()
 
 def make_zoom_charts(df, events, strats):
@@ -234,17 +226,15 @@ def chart_payoff(rec):
 
 # ─── HTML ─────────────────────────────
 def generate_html(fund_df, psi_df, res):
-    df, events, strats, rec = res['df'], res['events'], res['strats'], res['rec']
+    df, events, strats, rec, options = res['df'], res['events'], res['strats'], res['rec'], res['options']
     c1 = chart_fund_psi(fund_df, psi_df)
     c2 = chart_fund_ibex(df, events)
-    c3 = chart_backtest(res['bt'])
     c5 = chart_payoff(rec)
     zooms = make_zoom_charts(df, events, strats)
 
     fg = (FUND_CURR_PRICE / FUND_ENTRY_PRICE - 1) * 100
     nt = len(events)
     ns = sum(1 for e in events if e['sync'])
-    nb0 = sum(1 for b in res['bt'] if b['pay']==0)
 
     # Event table rows + tab buttons + panels
     hist_rows, tab_btns, tab_panels = '', '', ''
@@ -285,7 +275,26 @@ def generate_html(fund_df, psi_df, res):
             <div class="chart-box" style="padding:8px"><div id="zoom_{i}" style="height:260px"></div></div>
           </div></div>"""
 
-    # Cost table
+    # Contract options table
+    opt_rows = ''
+    for opt in options:
+        is_rec = opt['n'] == 16
+        st = ' style="background:#f0fff0;font-weight:600"' if is_rec else ''
+        tag = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_rec else ''
+        s10, s20, s30 = opt['scenarios'][10], opt['scenarios'][20], opt['scenarios'][30]
+        c10 = '#2e7d32' if s10['cov']>=80 else ('#e65100' if s10['cov']>=40 else '#c62828')
+        c20 = '#2e7d32' if s20['cov']>=80 else ('#e65100' if s20['cov']>=40 else '#c62828')
+        c30 = '#2e7d32' if s30['cov']>=80 else ('#e65100' if s30['cov']>=40 else '#c62828')
+        opt_rows += f'''<tr{st}>
+          <td style="text-align:left">{opt['label']}{tag}<br><span style="font-size:10px;color:#888">{opt['desc']}</span></td>
+          <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/年</span></td>
+          <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/FUND_VALUE*100:.1f}%</span></td>
+          <td style="color:{c10}">&euro;{s10['payoff']:,}<br><span style="font-size:10px">覆盖{s10['cov']}%</span></td>
+          <td style="color:{c20}">&euro;{s20['payoff']:,}<br><span style="font-size:10px">覆盖{s20['cov']}%</span></td>
+          <td style="color:{c30}">&euro;{s30['payoff']:,}<br><span style="font-size:10px">覆盖{s30['cov']}%</span></td>
+        </tr>'''
+
+    # Cost table (rolling frequency)
     cost_rows = ''
     for k, lab, freq in [('12M','12个月ATM 年滚',1),('6M','6个月ATM 半年滚',2),('3M','3个月ATM 季滚',4)]:
         s = strats[k]; T = s['months']/12
@@ -403,12 +412,20 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 
 <div class="section">
-<h2>四、为什么不能买远期Put放着不管</h2>
-<div class="alert a-bad">
-  21个月95%OTM Put：历史<b>{nb0}次回测全部到期归零</b>。IBEX过去4年从7,261涨到18,000+，固定行权价被甩开。
+<h2>四、买多少张合约？</h2>
+<div class="alert a-info">
+  合约张数决定保护力度。越多覆盖越高，但保费也越贵。下表展示三种配置在不同IBEX跌幅下的表现：
 </div>
-<div class="chart-box"><div id="c3" style="height:400px"></div></div>
-<p class="note-sm">蓝=买入时IBEX，橙虚线=行权价(95%)，绿=到期时IBEX。全部高于行权价→全部归零。</p>
+<table>
+  <tr><th style="text-align:left">配置</th><th>年保费</th><th>5年总保费</th><th>IBEX跌10%</th><th>IBEX跌20%</th><th>IBEX跌30%</th></tr>
+  {opt_rows}
+</table>
+<div class="alert a-warn">
+  <b>覆盖率含义</b>：IBEX跌X%时，按Beta={BETA_FUND_IBEX}估算基金对应损失。覆盖率 = Put赔付 &divide; 基金估算损失。<br>
+  <b>推荐16张</b>：年花&euro;{options[0]['prem']:,}（{options[0]['annual_pct']:.2f}%），大跌20%+时覆盖接近100%。
+  中等回调（10%）覆盖约{options[0]['scenarios'][10]['cov']}%，但成本最低、性价比最好。<br>
+  如果想要更高安全感，可选24张，保费增加50%但中等回调也能覆盖更多。
+</div>
 </div>
 
 <div class="section">
@@ -455,7 +472,7 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
     <li><b>保费是确定支出</b>：每年&euro;{rec['total']:,}，5年不出事白花&euro;{rec['total']*5:,}。</li>
-    <li><b>中等回调覆盖有限</b>：IBEX跌5-10%时，16张Mini合约只能覆盖部分损失。跌20%+才有力。</li>
+    <li><b>Beta估算有误差</b>：R&sup2;=42%意味着IBEX只能解释基金42%的波动。实际基金可能跌得比Beta预测的多，导致覆盖不足。</li>
     <li><b>IV影响成本</b>：恐慌期Put更贵，尽量在平静期滚仓。</li>
   </ol>
 </div>
@@ -473,7 +490,6 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <script>
 Plotly.newPlot('c1',__C1__.data,__C1__.layout,{{responsive:true}});
 Plotly.newPlot('c2',__C2__.data,__C2__.layout,{{responsive:true}});
-Plotly.newPlot('c3',__C3__.data,__C3__.layout,{{responsive:true}});
 Plotly.newPlot('c5',__C5__.data,__C5__.layout,{{responsive:true}});
 var Z=__ZOOM__;
 function showTab(i){{
@@ -488,7 +504,7 @@ function showTab(i){{
 if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});document.getElementById('zoom_0').dataset.r='1'}}
 </script></body></html>"""
 
-    html = html.replace('__C1__',c1).replace('__C2__',c2).replace('__C3__',c3).replace('__C5__',c5)
+    html = html.replace('__C1__',c1).replace('__C2__',c2).replace('__C5__',c5)
     html = html.replace('__ZOOM__', '['+','.join(c if c else 'null' for c in zooms)+']')
     return html
 
