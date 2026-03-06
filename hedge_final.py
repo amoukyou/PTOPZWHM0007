@@ -75,10 +75,107 @@ def fetch_live_prices():
             pass
     return prices
 
+def fetch_meff_iv():
+    """从MEFF每日公报抓取Mini IBEX Put期权的实盘IV数据"""
+    import re, subprocess
+    try:
+        r = subprocess.run(['curl', '-sL', '-H', 'User-Agent: Mozilla/5.0',
+            'https://www.meff.es/docs/Ficheros/boletin/ing/boletiipthu.htm'],
+            capture_output=True, text=True, timeout=20)
+        html = r.stdout
+        idx = html.find('OPTIONS (PUT)')
+        if idx < 0:
+            return None
+        chunk = html[idx:idx+80000]
+        lines = re.sub(r'<[^>]+>', '|', chunk)
+        lines = re.sub(r'\|+', '|', lines).split('|')
+        # 解析 "Mar-27   15,500" 格式的条目
+        data = {}  # {expiry: [(strike, close, iv, delta, oi), ...]}
+        i = 0
+        while i < len(lines):
+            s = lines[i].strip()
+            m = re.match(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2})(?:\s+w\d)?\s*(?:&nbsp;)*\s*([\d,]+(?:\.\d+)?)', s)
+            if m:
+                exp = m.group(1)
+                strike_s = m.group(2).replace(',', '')
+                strike = float(strike_s)
+                if strike < 100:  # 跳过个股期权（strike很小）
+                    i += 1
+                    continue
+                fields = []
+                j = i + 1
+                while j < len(lines) and len(fields) < 8:
+                    f = lines[j].strip()
+                    if f and f != '&nbsp;':
+                        fields.append(f)
+                    j += 1
+                close = float(fields[0].replace(',', '')) if fields and fields[0] != '-' else None
+                iv = float(fields[4]) / 100 if len(fields) > 4 and fields[4] != '-' else None
+                delta = float(fields[5]) if len(fields) > 5 and fields[5] != '-' else None
+                oi = int(fields[7].replace(',', '')) if len(fields) > 7 and fields[7] != '-' else 0
+                if close and iv and strike > 5000:
+                    data.setdefault(exp, []).append(dict(strike=strike, close=close, iv=iv, delta=delta, oi=oi))
+            i += 1
+        return data
+    except Exception:
+        return None
+
+def pick_expiry(meff_data):
+    """选择最接近1年的到期月"""
+    if not meff_data:
+        return None, []
+    from datetime import datetime
+    now = datetime.now()
+    best_exp, best_diff, best_points = None, 999, []
+    for exp_str, points in meff_data.items():
+        if len(points) < 2:
+            continue
+        try:
+            exp_date = datetime.strptime('15-' + exp_str, '%d-%b-%y')
+            diff = abs((exp_date - now).days - 365)
+            if diff < best_diff:
+                best_exp, best_diff, best_points = exp_str, diff, points
+        except Exception:
+            continue
+    return best_exp, sorted(best_points, key=lambda p: p['strike'])
+
+def interp_iv(strike, iv_points, fallback=IBEX_IMPLIED_VOL):
+    """根据MEFF实盘数据插值IV。线性插值，边界外线性外推（带上下限）"""
+    if not iv_points or len(iv_points) < 2:
+        return fallback
+    pts = sorted(iv_points, key=lambda p: p['strike'])
+    if strike <= pts[0]['strike']:
+        # 左侧外推（更深OTM → IV更高）
+        if len(pts) >= 2:
+            slope = (pts[1]['iv'] - pts[0]['iv']) / (pts[1]['strike'] - pts[0]['strike'])
+            iv = pts[0]['iv'] + slope * (strike - pts[0]['strike'])
+            return max(min(iv, 0.50), 0.10)  # 限制在10%-50%
+        return pts[0]['iv']
+    if strike >= pts[-1]['strike']:
+        # 右侧外推（更深ITM → IV更低）
+        if len(pts) >= 2:
+            slope = (pts[-1]['iv'] - pts[-2]['iv']) / (pts[-1]['strike'] - pts[-2]['strike'])
+            iv = pts[-1]['iv'] + slope * (strike - pts[-1]['strike'])
+            return max(min(iv, 0.50), 0.08)
+        return pts[-1]['iv']
+    # 线性插值
+    for j in range(len(pts) - 1):
+        if pts[j]['strike'] <= strike <= pts[j+1]['strike']:
+            t = (strike - pts[j]['strike']) / (pts[j+1]['strike'] - pts[j]['strike'])
+            return pts[j]['iv'] * (1 - t) + pts[j+1]['iv'] * t
+    return fallback
+
+# 全局MEFF数据（运行时填充）
+_meff_iv_points = []
+_meff_expiry = None
+_meff_source = 'BS'  # 'MEFF' or 'BS'
+
 def norm_cdf(x):
     return (1 + math.erf(x / math.sqrt(2))) / 2
 
-def bs_put(S, K, T, r=ECB_RATE, sigma=IBEX_IMPLIED_VOL):
+def bs_put(S, K, T, r=ECB_RATE, sigma=None):
+    if sigma is None:
+        sigma = interp_iv(K, _meff_iv_points, IBEX_IMPLIED_VOL)
     if T <= 0: return max(K - S, 0)
     d1 = (math.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*math.sqrt(T))
     d2 = d1 - sigma*math.sqrt(T)
@@ -760,20 +857,25 @@ body.lang-zh .en{{display:none}}
 <div style="margin-bottom:14px">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
   <span style="font-size:14px;font-weight:700;color:#1a237e">{t('IBEX35 Put 期权定价参考','IBEX35 Put Pricing Reference')}</span>
-  <span style="font-size:11px;color:#aaa">BS {t('理论价','theoretical')} | IV={IBEX_IMPLIED_VOL*100:.1f}% | r={ECB_RATE*100:.1f}% | T=1yr | {t('到期','Expiry')} 2027-03</span>
+  <span style="font-size:11px;color:{'#2e7d32' if live.get('meff_source')=='MEFF' else '#aaa'}">
+    {'MEFF ' + t('实盘IV插值','market IV interpolated') + ' (' + live.get('meff_expiry','?') + ', ' + str(len(live.get('meff_points',[]))) + t('个数据点',' data points') + ')' if live.get('meff_source')=='MEFF' else 'BS ' + t('理论价','theoretical') + ' | IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}
+    | r={ECB_RATE*100:.1f}% | T=1yr | {t('到期','Expiry')} {live.get('meff_expiry','2027-03')}
+  </span>
 </div>
 <table id="option-chain-table" style="font-size:13px">
   <tr>
     <th>{t('行权价','Strike')}</th>
     <th>{t('距现价','vs Spot')}</th>
-    <th>{t('BS价格/张','BS Price/Ct')}</th>
+    <th>IV</th>
+    <th>{t('价格/张','Price/Ct')}</th>
     <th>{t('方案A','Plan A')}</th>
     <th>{t('方案B','Plan B')}</th>
   </tr>
   <tbody id="chain-body"></tbody>
 </table>
 <div style="font-size:11px;color:#aaa;margin-top:4px">
-  {t('以上为BS理论价，实际OTM价格因IV skew可能高30-50%。','Above are BS theoretical prices. Actual OTM prices may be 30-50% higher due to IV skew.')}
+  {t('价格基于'+('MEFF实盘IV插值（已包含skew）' if live.get('meff_source')=='MEFF' else 'BS理论价（固定IV='+str(IBEX_IMPLIED_VOL*100)+'%，实际OTM因skew可能高30-50%）')+'。',
+     'Prices based on '+('MEFF market IV interpolation (skew included)' if live.get('meff_source')=='MEFF' else 'BS theoretical (flat IV='+str(IBEX_IMPLIED_VOL*100)+'%, actual OTM may be 30-50% higher due to skew)')+'.')}
   {t('查看实盘报价：','View live quotes: ')}
   <a href="https://www.meff.es/docs/Ficheros/boletin/ing/boletiipthu.htm" target="_blank" style="color:#1a237e;font-weight:600">{t('MEFF每日行情公报（含完整期权链）','MEFF Daily Bulletin (full option chain)')}</a>
   &middot; <a href="https://www.meff.es/aspx/calculadoras/calculadoraOp.aspx?id=ing" target="_blank" style="color:#1a237e;font-weight:600">{t('MEFF期权计算器','MEFF Option Simulator')}</a>
@@ -920,7 +1022,7 @@ body.lang-zh .en{{display:none}}
   <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
   <li><b>{t('买第一腿——ATM Put &times;8','Buy Leg 1 — ATM Put &times;8')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-atm-k">{rec['K']:,}</span></b>{t('（ATM，50点间距）。参考价约',' (ATM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-atm-price">&euro;{rec['price']:,.0f}</span>/{t('张','contract')}{t('，8张合计约',', 8 contracts total ~')}<span id="dyn-s7-atm-total">&euro;{round(rec['price']*8):,}</span>。</li>
   <li><b>{t('买第二腿——90%OTM Put &times;20','Buy Leg 2 — 90%OTM Put &times;20')}</b>{t('：同到期月，行权价',': Same expiry month, strike')}<b><span id="dyn-s7-otm-k">{K_90:,}</span></b> (90% OTM){t('。参考价约','. Ref. price ~')}<span id="dyn-s7-otm-price">&euro;{round(bs_put(ibex_now,K_90,1.0)):,}</span>/{t('张','contract')}{t('，20张合计约',', 20 contracts total ~')}<span id="dyn-s7-otm-total">&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}</span>。</li>
-  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-a">&euro;{rec_prem:,}</span> (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
+  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-a">&euro;{rec_prem:,}</span> (Black-Scholes, {'MEFF IV ' + t('插值','interpolated') if live.get('meff_source')=='MEFF' else 'IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}, r={ECB_RATE*100:.1f}%){t('。','.')}
   <b>{t('实际市价预计上浮10-30%','Actual market price expected 10-30% higher')}</b>{t('，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV='+str(IBEX_IMPLIED_VOL*100)+'%更高，OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。',', especially OTM Puts due to volatility skew (actual IV ~22-25%, higher than the ATM IV='+str(IBEX_IMPLIED_VOL*100)+'% used in this report). OTM actual prices may be 30-50% above BS theoretical values. Always use IBKR/MEFF live quotes before placing orders.')}</li>
   <li><b>{t('分腿动态滚仓','Split-Leg Dynamic Rolling')}</b>{t('（关键！）：ATM腿和OTM腿职责不同，滚仓策略也不同：',' (Critical!): ATM and OTM legs have different roles, so different rolling strategies:')}<br>
   <b style="color:#1565c0">ATM×8{t('（跟踪腿）',' (Tracking Leg)')}</b>{t('：IBEX涨超10%（>','：When IBEX rises >10% (>')}<span id="dyn-s7-trigger-a">{round(ibex_now*1.10):,}</span>{t('）时',')')}<b>{t('立即滚仓',' roll immediately')}</b>{t('——卖掉旧ATM Put，买入新ATM Put重设行权价。ATM必须紧贴当前市场，否则小跌时赔不了（Event #10教训）。建议每月检查。',' — sell old ATM Put, buy new ATM Put to reset strike. ATM must stay close to current market; otherwise it won&rsquo;t pay in small drops (Event #10 lesson). Check monthly.')}<br>
@@ -944,7 +1046,7 @@ body.lang-zh .en{{display:none}}
 <div class="steps"><ol>
   <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
   <li><b>{t('买90%OTM Put &times;24','Buy 90%OTM Put &times;24')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-otm-k-b">{K_90:,}</span></b>{t('（90% OTM，50点间距）。参考价约',' (90% OTM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-otm-price-b">&euro;{round(bs_put(ibex_now,K_90,1.0)):,}</span>/{t('张','contract')}{t('，24张合计约',', 24 contracts total ~')}<span id="dyn-s7-otm-total-b">&euro;{planb_prem:,}</span>。</li>
-  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-b">&euro;{planb_prem:,}</span> (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
+  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-b">&euro;{planb_prem:,}</span> (Black-Scholes, {'MEFF IV ' + t('插值','interpolated') if live.get('meff_source')=='MEFF' else 'IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}, r={ECB_RATE*100:.1f}%){t('。','.')}
   <b>{t('实际市价预计上浮30-50%','Actual market price expected 30-50% higher')}</b>{t('——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV='+str(IBEX_IMPLIED_VOL*100)+'%。实际年成本可能达',' — OTM Puts have higher actual IV (~22-25%) due to volatility skew, well above ATM IV='+str(IBEX_IMPLIED_VOL*100)+'%. Actual annual cost may reach')}&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}{t('。下单前务必以IBKR/MEFF实际报价为准。','. Always use IBKR/MEFF live quotes before placing orders.')}</li>
   <li><b>{t('动态滚仓','Dynamic Rolling')}</b>{t('：方案B全部是OTM Put，与方案A的分腿滚仓逻辑类似——OTM的职责是防崩盘，IBEX涨10%后从虚值10%变成虚值20%，但大崩盘时仍会深度实值。因此方案B',': Plan B is all OTM Puts, similar logic to Plan A&rsquo;s split-leg rolling — OTM&rsquo;s role is crash protection. After IBEX rises 10%, OTM goes from 10% to 20% OTM, but in a real crash it&rsquo;ll still be deep ITM. So Plan B')}<b>{t('以年度正常滚仓为主','primarily uses annual expiry rolling')}</b>{t('，不需要频繁动态触发。',', no frequent dynamic triggers needed.')}<br>
   {t('但如果IBEX','But if IBEX')}<b>{t('累计涨超20%','rises more than 20% cumulatively')}</b> (&gt;<span id="dyn-s7-trigger-b">{round(ibex_now*1.20):,}</span>){t('，OTM行权价已严重脱离市场，此时应滚仓重设行权价。建议每月检查。',', OTM strikes are too far from market — roll to reset strikes. Check monthly.')}</li>
@@ -1072,14 +1174,39 @@ function bsPut(S, K, T, r, sigma) {{
   var d2 = d1 - sigma*Math.sqrt(T);
   return K*Math.exp(-r*T)*normCdf(-d2) - S*normCdf(-d1);
 }}
+function bsPutAuto(S, K, T, r) {{
+  return bsPut(S, K, T, r, interpIv(K));
+}}
 
 // ═══ Parameters as JS globals ═══
 var P = {{
   fv: {fv}, ibex0: {ibex_now}, psi: {psi_now},
   betaFI: {BETA_FUND_IBEX}, betaFP: {BETA_FUND_PSI}, betaIP: {BETA_IBEX_PSI},
   iv: {IBEX_IMPLIED_VOL}, r: {ECB_RATE}, initInv: {INITIAL_INV}, psiEntry: {PSI20_ENTRY_ACT},
-  avgCR: {avg_crash_ratio}, fundNav: {fund_nav}, fundUnits: {FUND_UNITS}
+  avgCR: {avg_crash_ratio}, fundNav: {fund_nav}, fundUnits: {FUND_UNITS},
+  meffPts: {str([dict(strike=p['strike'], iv=p['iv']) for p in _meff_iv_points]) if _meff_iv_points else '[]'}
 }};
+function interpIv(K) {{
+  var pts = P.meffPts;
+  if (!pts || pts.length < 2) return P.iv;
+  pts.sort(function(a,b){{return a.strike-b.strike}});
+  if (K <= pts[0].strike) {{
+    var slope = (pts[1].iv - pts[0].iv) / (pts[1].strike - pts[0].strike);
+    return Math.max(0.10, Math.min(0.50, pts[0].iv + slope * (K - pts[0].strike)));
+  }}
+  if (K >= pts[pts.length-1].strike) {{
+    var n = pts.length;
+    var slope = (pts[n-1].iv - pts[n-2].iv) / (pts[n-1].strike - pts[n-2].strike);
+    return Math.max(0.08, Math.min(0.50, pts[n-1].iv + slope * (K - pts[n-1].strike)));
+  }}
+  for (var i = 0; i < pts.length - 1; i++) {{
+    if (K >= pts[i].strike && K <= pts[i+1].strike) {{
+      var t = (K - pts[i].strike) / (pts[i+1].strike - pts[i].strike);
+      return pts[i].iv * (1 - t) + pts[i+1].iv * t;
+    }}
+  }}
+  return P.iv;
+}}
 
 // ═══ Fetch all live prices ═══
 function fetchAll() {{
@@ -1165,12 +1292,14 @@ function buildChain(ibex, K, K90) {{
   var rows = '';
   sorted.forEach(function(s) {{
     var pct = ((s / ibex - 1) * 100).toFixed(1);
-    var price = bsPut(ibex, s, 1.0, P.r, P.iv);
+    var price = bsPutAuto(ibex, s, 1.0, P.r);
     var planA = '', planB = '';
     if (s === K) planA = '\u00d78';
     if (s === K90) {{ planA += (planA ? ' + ' : '') + '\u00d720'; planB = '\u00d724'; }}
+    var iv = interpIv(s);
     var hl = (s === K || s === K90) ? ' style="background:#f0fff0;font-weight:700"' : '';
     rows += '<tr' + hl + '><td>' + s.toLocaleString() + '</td><td>' + pct + '%</td>';
+    rows += '<td style="font-size:11px;color:#888">' + (iv*100).toFixed(1) + '%</td>';
     rows += '<td>\u20AC' + Math.round(price).toLocaleString() + '</td>';
     rows += '<td style="color:#2e7d32;font-weight:700">' + planA + '</td>';
     rows += '<td style="color:#e65100;font-weight:700">' + planB + '</td></tr>';
@@ -1202,7 +1331,7 @@ function buildFullChain(ibex, K, K90) {{
   var hi = Math.round(ibex * 1.05 / 50) * 50;
   for (var s = lo; s <= hi; s += 50) {{
     var pct = ((s / ibex - 1) * 100).toFixed(1);
-    var price = bsPut(ibex, s, 1.0, P.r, P.iv);
+    var price = bsPutAuto(ibex, s, 1.0, P.r);
     var hl = (s === K || s === K90) ? ' style="background:#f0fff0;font-weight:600"' : '';
     rows += '<tr' + hl + '><td>' + s.toLocaleString() + '</td><td>' + pct + '%</td><td>\u20AC' + Math.round(price).toLocaleString() + '</td></tr>';
   }}
@@ -1379,8 +1508,8 @@ function recalcAll() {{
 
   var K = Math.round(ibex / 50) * 50;
   var K90 = Math.round(ibex * 0.9 / 50) * 50;
-  var pAtm = bsPut(ibex, K, 1.0, P.r, P.iv);
-  var pOtm = bsPut(ibex, K90, 1.0, P.r, P.iv);
+  var pAtm = bsPutAuto(ibex, K, 1.0, P.r);
+  var pOtm = bsPutAuto(ibex, K90, 1.0, P.r);
 
   var premA = Math.round(pAtm * 8 + pOtm * 20);
   var premB = Math.round(pOtm * 24);
@@ -1448,6 +1577,23 @@ def main():
                 estx_date=prices.get('estx_date','?'))
     print(f'  基金NAV=€{fund_nav:.2f}({fund_src}, {prices.get("fund_date","?")}) 市值=€{fund_value:,}')
     print(f'  PSI20={psi_now:,.0f} IBEX={ibex_now:,.0f} ESTX={estx_now:,.0f}')
+
+    print('获取MEFF期权IV...')
+    global _meff_iv_points, _meff_expiry, _meff_source
+    meff_data = fetch_meff_iv()
+    if meff_data:
+        _meff_expiry, _meff_iv_points = pick_expiry(meff_data)
+        if _meff_iv_points and len(_meff_iv_points) >= 2:
+            _meff_source = 'MEFF'
+            pts_str = ', '.join(f'K={p["strike"]:,.0f}→IV={p["iv"]*100:.1f}%' for p in _meff_iv_points)
+            print(f'  MEFF {_meff_expiry}: {len(_meff_iv_points)}个数据点 [{pts_str}]')
+        else:
+            print(f'  MEFF数据不足，使用BS固定IV={IBEX_IMPLIED_VOL*100}%')
+    else:
+        print(f'  MEFF抓取失败，使用BS固定IV={IBEX_IMPLIED_VOL*100}%')
+    live['meff_source'] = _meff_source
+    live['meff_expiry'] = _meff_expiry or 'N/A'
+    live['meff_points'] = _meff_iv_points
 
     print('加载历史数据...')
     fund_df, ibex_df, psi_df = load_data(live)
