@@ -760,7 +760,7 @@ body.lang-zh .en{{display:none}}
 <div style="margin-bottom:14px">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
   <span style="font-size:14px;font-weight:700;color:#1a237e">{t('IBEX35 Put 期权定价参考','IBEX35 Put Pricing Reference')}</span>
-  <span style="font-size:11px;color:#aaa">BS {t('理论价','theoretical')} | IV={IBEX_IMPLIED_VOL*100:.1f}% | r={ECB_RATE*100:.1f}% | T=1yr</span>
+  <span style="font-size:11px;color:#aaa">BS {t('理论价','theoretical')} | IV={IBEX_IMPLIED_VOL*100:.1f}% | r={ECB_RATE*100:.1f}% | T=1yr | {t('到期','Expiry')} 2027-03</span>
 </div>
 <table id="option-chain-table" style="font-size:13px">
   <tr>
@@ -773,8 +773,11 @@ body.lang-zh .en{{display:none}}
   <tbody id="chain-body"></tbody>
 </table>
 <div style="font-size:11px;color:#aaa;margin-top:4px">
-  {t('实际OTM价格因IV skew可能高30-50%，以IBKR/MEFF实盘报价为准。','Actual OTM prices may be 30-50% higher due to IV skew. Use IBKR/MEFF live quotes.')}
-  <a href="javascript:void(0)" onclick="toggleFullChain()" id="chain-toggle" style="color:#1a237e;font-weight:600">{t('展开完整链','Show full chain')}</a>
+  {t('实际OTM价格因IV skew可能高30-50%，以实盘报价为准。','Actual OTM prices may be 30-50% higher due to IV skew. Use live quotes.')}
+  {t('查看实盘：','Live prices: ')}
+  <a href="https://www.meff.es/ing/Financial-Derivatives/Options-on-IBEX-35" target="_blank" style="color:#1a237e;font-weight:600">MEFF</a>
+  &middot; <a href="https://www.meff.es/aspx/calculadoras/calculadoraOp.aspx?id=ing" target="_blank" style="color:#1a237e;font-weight:600">{t('MEFF期权计算器','MEFF Option Simulator')}</a>
+  &middot; <a href="javascript:void(0)" onclick="toggleFullChain()" id="chain-toggle" style="color:#1a237e;font-weight:600">{t('展开完整链','Show full chain')}</a>
 </div>
 <div id="full-chain-box" style="display:none;margin-top:8px">
 <table style="font-size:12px">
