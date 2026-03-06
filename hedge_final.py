@@ -177,10 +177,72 @@ def interp_iv(strike, iv_points, fallback=IBEX_IMPLIED_VOL):
             return pts[j]['iv'] * (1 - t) + pts[j+1]['iv'] * t
     return fallback
 
+def fetch_meff_live_chain(ibex_now):
+    """从MEFF官网抓取Mini IBEX Put期权链实时bid/ask报价（15分钟延迟）"""
+    import re, subprocess, urllib.parse
+    url = 'https://www.meff.es/ing/Financial-Derivatives/Spreadsheet/FIEM_MiniIbex_35'
+    try:
+        # Step 1: GET获取VIEWSTATE
+        r = subprocess.run(['curl', '-sL', '-c', '/tmp/meff_cookies.txt',
+            '-H', 'User-Agent: Mozilla/5.0', url],
+            capture_output=True, text=True, timeout=20)
+        vs = re.search(r'__VIEWSTATE" value="([^"]*)"', r.stdout)
+        vsg = re.search(r'__VIEWSTATEGENERATOR" value="([^"]*)"', r.stdout)
+        if not vs:
+            return {}
+        # Step 2: POST with full VIEWSTATE to get all expiration data
+        post_data = urllib.parse.urlencode({
+            '__VIEWSTATE': vs.group(1),
+            '__VIEWSTATEGENERATOR': vsg.group(1) if vsg else '',
+            'OpStyle': 'E', 'OpType': 'P', 'OpStrike': 'OPE20260918'
+        })
+        r2 = subprocess.run(['curl', '-sL', '-b', '/tmp/meff_cookies.txt',
+            '-H', 'User-Agent: Mozilla/5.0',
+            '-H', 'Content-Type: application/x-www-form-urlencoded',
+            '-d', post_data, url], capture_output=True, text=True, timeout=20)
+        html = r2.stdout
+        # 提取可用到期月
+        avail_exps = re.findall(r'value="(OPE\d+)"[^>]*>([^<]+)<', html)
+        # 解析所有行 (data-tipo标识到期月)
+        all_rows = re.findall(r'<tr[^>]*data-tipo="(OPE\d+)"[^>]*>(.*?)</tr>', html, re.DOTALL)
+        result = {}  # {exp_code: [rows...]}
+        for tipo, data in all_rows:
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', data)
+            if len(cells) < 13:
+                continue
+            def cl(c):
+                c = c.replace('&#160;','').replace('&nbsp;','').replace(',','').strip()
+                return None if c.startswith('-') or c=='-' or not c else c
+            try:
+                strike = float(cl(cells[0]).replace(',','')) if cl(cells[0]) else None
+                if not strike or strike < 5000:
+                    continue
+                bid = float(cl(cells[3])) if cl(cells[3]) else None
+                ask = float(cl(cells[4])) if cl(cells[4]) else None
+                last = float(cl(cells[7])) if cl(cells[7]) else None
+                vol = int(float(cl(cells[8]))) if cl(cells[8]) else 0
+                prev = float(cl(cells[12])) if cl(cells[12]) else None
+                result.setdefault(tipo, []).append(dict(
+                    strike=strike, bid=bid, ask=ask, last=last, vol=vol, prev=prev,
+                    otm_pct=round((1 - strike/ibex_now) * 100, 1) if ibex_now else None
+                ))
+            except (ValueError, TypeError):
+                continue
+        # 排序
+        for k in result:
+            result[k] = sorted(result[k], key=lambda x: x['strike'])
+        # 附上到期月标签
+        exp_labels = {code: label for code, label in avail_exps}
+        return {'chains': result, 'labels': exp_labels}
+    except Exception as e:
+        print(f'  MEFF实时期权链抓取失败: {e}')
+        return {}
+
 # 全局MEFF数据（运行时填充）
 _meff_iv_points = []
 _meff_expiry = None
 _meff_source = 'BS'  # 'MEFF' or 'BS'
+_meff_live_chain = {}  # 实时期权链数据
 
 def norm_cdf(x):
     return (1 + math.erf(x / math.sqrt(2))) / 2
@@ -580,6 +642,103 @@ def t(zh, en):
     """Bilingual text wrapper"""
     return f'<span class="zh">{zh}</span><span class="en">{en}</span>'
 
+def _build_live_chain_html(live, ibex_now, K_atm, K_otm):
+    """生成MEFF实时期权链HTML表格"""
+    chain_data = live.get('meff_chain', {})
+    chains = chain_data.get('chains', {})
+    labels = chain_data.get('labels', {})
+    if not chains:
+        return ''
+    # 选择所有Put到期月（排除近期周度期权，只保留月度以上）
+    from datetime import datetime
+    now = datetime.now()
+    put_exps = []
+    for code in sorted(chains.keys()):
+        if not code.startswith('OPE'):
+            continue
+        # 解析到期日: OPE20260918 → 2026-09-18
+        try:
+            exp_date = datetime.strptime(code[3:], '%Y%m%d')
+            days_to_exp = (exp_date - now).days
+            if days_to_exp > 30:  # 只显示1个月以上的
+                put_exps.append((code, exp_date, days_to_exp))
+        except ValueError:
+            continue
+
+    if not put_exps:
+        return ''
+
+    rows_html = ''
+    for code, exp_date, days in put_exps:
+        pts = chains.get(code, [])
+        if not pts:
+            continue
+        exp_label = labels.get(code, exp_date.strftime('%d/%m/%Y'))
+        months = days / 30.4
+        rows_html += f'''<tr style="background:#e8eaf6"><td colspan="7" style="font-weight:700;font-size:13px;padding:8px">
+            {t('到期','Expiry')}: <b>{exp_label}</b> ({t(f'约{months:.0f}个月', f'~{months:.0f} months')})</td></tr>'''
+        for p in pts:
+            if p['strike'] < ibex_now * 0.7 or p['strike'] > ibex_now * 1.05:
+                continue  # 只显示合理范围
+            otm = (1 - p['strike']/ibex_now) * 100
+            # 高亮推荐行权价
+            style = ''
+            tag = ''
+            if abs(p['strike'] - K_atm) < 51:
+                style = 'background:#e8f5e9;font-weight:600'
+                tag = f' <b style="color:#2e7d32">← ATM ({t("方案A","Plan A")})</b>'
+            elif abs(p['strike'] - K_otm) < 51:
+                style = 'background:#fff3e0;font-weight:600'
+                tag = f' <b style="color:#e65100">← 90%OTM ({t("推荐","Rec.")})</b>'
+
+            bid_s = f'€{p["bid"]:,.0f}' if p['bid'] else '-'
+            ask_s = f'€{p["ask"]:,.0f}' if p['ask'] else '-'
+            spread_s = f'€{p["ask"]-p["bid"]:,.0f}' if p['bid'] and p['ask'] else '-'
+            last_s = f'€{p["last"]:,.0f}' if p['last'] else '-'
+            liq = ''
+            if p['bid'] and p['ask']:
+                liq = '✓'
+            elif p['ask']:
+                liq = t('卖','Ask')
+            elif p['bid']:
+                liq = t('买','Bid')
+
+            rows_html += f'''<tr style="{style}">
+                <td style="text-align:right">{p["strike"]:,.0f}</td>
+                <td style="text-align:right">{otm:.1f}%</td>
+                <td style="text-align:right;color:#2e7d32">{bid_s}</td>
+                <td style="text-align:right;color:#c62828">{ask_s}</td>
+                <td style="text-align:right;color:#888">{spread_s}</td>
+                <td style="text-align:right">{last_s}</td>
+                <td style="text-align:center">{liq}{tag}</td></tr>'''
+
+    return f'''
+<div class="section">
+<h2>{t('六B、MEFF 实时期权链','Section 6B: MEFF Live Option Chain')}</h2>
+<div class="alert a-warn" style="font-size:13px;margin-bottom:12px">
+  <b>{t('以下为MEFF交易所真实报价','Below are actual MEFF exchange quotes')}</b>({t('延迟约15分钟','~15 min delay')})
+  {t('。Bid=买入价(你卖出价)，Ask=卖出价(你买入价)。','。Bid=buy price (your sell price), Ask=sell price (your buy price).')}
+  {t('下单时以你的IBKR终端实时报价为准。','Use your IBKR terminal live quotes when placing orders.')}
+</div>
+<div style="overflow-x:auto">
+<table style="width:100%;border-collapse:collapse;font-size:13px">
+<thead>
+<tr style="background:#1a237e;color:white">
+  <th style="padding:6px;text-align:right">Strike</th>
+  <th style="padding:6px;text-align:right">OTM%</th>
+  <th style="padding:6px;text-align:right;color:#a5d6a7">Bid</th>
+  <th style="padding:6px;text-align:right;color:#ef9a9a">Ask</th>
+  <th style="padding:6px;text-align:right">Spread</th>
+  <th style="padding:6px;text-align:right">Last</th>
+  <th style="padding:6px;text-align:center">{t('流动性','Liquidity')}</th>
+</tr>
+</thead>
+<tbody>{rows_html}</tbody>
+</table>
+</div>
+<p style="font-size:11px;color:#888;margin-top:8px">{t('数据来源: MEFF官网实时行情页 | 乘数 €1/点 | 欧式期权','Source: MEFF live market page | Multiplier €1/pt | European style')}</p>
+</div>'''
+
 # ─── HTML ─────────────────────────────
 def generate_html(fund_df, psi_df, res, live):
     df, events, strats, rec, options = res['df'], res['events'], res['strats'], res['rec'], res['options']
@@ -598,6 +757,33 @@ def generate_html(fund_df, psi_df, res, live):
     ibex_now = live['ibex']
     estx_now = live['estx']
     gen_time = live['gen_time']
+
+    # 从MEFF实时期权链中查找真实Ask价格（如有）
+    _real_atm_ask = None
+    _real_otm_ask = None
+    chain_data = live.get('meff_chain', {})
+    if chain_data.get('chains'):
+        # 找最接近1年的到期月
+        from datetime import datetime as _dt
+        now = _dt.now()
+        best_code, best_diff = None, 9999
+        for code in chain_data['chains']:
+            if not code.startswith('OPE'):
+                continue
+            try:
+                exp = _dt.strptime(code[3:], '%Y%m%d')
+                diff = abs((exp - now).days - 365)
+                if diff < best_diff:
+                    best_code, best_diff = code, diff
+            except ValueError:
+                continue
+        if best_code:
+            pts = chain_data['chains'][best_code]
+            for p in pts:
+                if abs(p['strike'] - K) < 51 and p.get('ask'):
+                    _real_atm_ask = p['ask']
+                if abs(p['strike'] - K_90) < 51 and p.get('ask'):
+                    _real_otm_ask = p['ask']
 
     c1 = chart_fund_psi_ibex(fund_df, psi_df, res['df'][['Date','ibex']], live)
     c2 = chart_fund_ibex(df, events)
@@ -971,8 +1157,8 @@ body.lang-zh .en{{display:none}}
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv"><span id="dyn-pa-prem">&euro;{rec_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span></div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div></div>
+    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv"><span id="dyn-pa-prem">&euro;{rec_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span></div>{f'<div style="font-size:11px;color:#c62828;margin-top:4px">MEFF Ask: ATM €{_real_atm_ask:,.0f}×8 + OTM €{_real_otm_ask:,.0f}×20 = <b>€{round(_real_atm_ask*8+_real_otm_ask*20):,}</b></div>' if _real_atm_ask and _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
   </div>
 </div>
@@ -1016,8 +1202,8 @@ body.lang-zh .en{{display:none}}
   <h3 style="color:#e65100">{t('纯90%OTM Put &times;24，12个月年滚 + 动态滚仓','Pure 90%OTM Put &times;24, 12-Month Annual Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem">&euro;{planb_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span></div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div></div>
+    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem">&euro;{planb_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span></div>{f'<div style="font-size:11px;color:#c62828;margin-top:4px">MEFF Ask: €{_real_otm_ask:,.0f}×24 = <b>€{round(_real_otm_ask*24):,}</b></div>' if _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*5):,}</div>' if _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-save">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</span></div></div>
     <div class="rec-item"><div class="rl">{t('代价','Trade-off')}</div><div class="rv" style="color:#c62828;font-size:16px">{t('10%以内跌幅不赔','No payout for drops under 10%')}</div></div>
   </div>
@@ -1056,6 +1242,7 @@ body.lang-zh .en{{display:none}}
 </div>
 </div>
 
+{_build_live_chain_html(live, ibex_now, K, K_90)}
 <!-- ===== Plan A: 七 ===== -->
 <div class="plan-panel-a show">
 <div class="section">
@@ -1645,6 +1832,19 @@ def main():
     live['meff_source'] = _meff_source
     live['meff_expiry'] = _meff_expiry or 'N/A'
     live['meff_points'] = _meff_iv_points
+
+    print('获取MEFF实时期权链...')
+    global _meff_live_chain
+    chain_data = fetch_meff_live_chain(ibex_now)
+    if chain_data and chain_data.get('chains'):
+        _meff_live_chain = chain_data
+        live['meff_chain'] = chain_data
+        total = sum(len(v) for v in chain_data['chains'].values())
+        put_exps = [k for k in chain_data['chains'] if k.startswith('OPE')]
+        print(f'  {len(put_exps)}个到期月, 共{total}个报价')
+    else:
+        print('  实时期权链抓取失败')
+        live['meff_chain'] = {}
 
     # 将live NAV写入CSV，避免数据缺口
     update_csv_with_live(live)
