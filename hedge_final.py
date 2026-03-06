@@ -78,47 +78,59 @@ def fetch_live_prices():
 def fetch_meff_iv():
     """从MEFF每日公报抓取Mini IBEX Put期权的实盘IV数据"""
     import re, subprocess
-    try:
-        r = subprocess.run(['curl', '-sL', '-H', 'User-Agent: Mozilla/5.0',
-            'https://www.meff.es/docs/Ficheros/boletin/ing/boletiipthu.htm'],
-            capture_output=True, text=True, timeout=20)
-        html = r.stdout
-        idx = html.find('OPTIONS (PUT)')
-        if idx < 0:
-            return None
-        chunk = html[idx:idx+80000]
-        lines = re.sub(r'<[^>]+>', '|', chunk)
-        lines = re.sub(r'\|+', '|', lines).split('|')
-        # 解析 "Mar-27   15,500" 格式的条目
-        data = {}  # {expiry: [(strike, close, iv, delta, oi), ...]}
-        i = 0
-        while i < len(lines):
-            s = lines[i].strip()
-            m = re.match(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2})(?:\s+w\d)?\s*(?:&nbsp;)*\s*([\d,]+(?:\.\d+)?)', s)
-            if m:
-                exp = m.group(1)
-                strike_s = m.group(2).replace(',', '')
-                strike = float(strike_s)
-                if strike < 100:  # 跳过个股期权（strike很小）
-                    i += 1
-                    continue
-                fields = []
-                j = i + 1
-                while j < len(lines) and len(fields) < 8:
-                    f = lines[j].strip()
-                    if f and f != '&nbsp;':
-                        fields.append(f)
-                    j += 1
-                close = float(fields[0].replace(',', '')) if fields and fields[0] != '-' else None
-                iv = float(fields[4]) / 100 if len(fields) > 4 and fields[4] != '-' else None
-                delta = float(fields[5]) if len(fields) > 5 and fields[5] != '-' else None
-                oi = int(fields[7].replace(',', '')) if len(fields) > 7 and fields[7] != '-' else 0
-                if close and iv and strike > 5000:
-                    data.setdefault(exp, []).append(dict(strike=strike, close=close, iv=iv, delta=delta, oi=oi))
-            i += 1
-        return data
-    except Exception:
-        return None
+    from datetime import datetime, timedelta
+    day_names = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+    # 从今天开始逐日回退，最多试5个工作日（处理假期、未发布等情况）
+    for days_back in range(7):
+        try:
+            d = datetime.now() - timedelta(days=days_back)
+            wd = d.weekday()
+            if wd >= 5:  # 跳过周末
+                continue
+            day_suffix = day_names[wd]
+            url = f'https://www.meff.es/docs/Ficheros/boletin/ing/boletiip{day_suffix}.htm'
+            r = subprocess.run(['curl', '-sL', '-H', 'User-Agent: Mozilla/5.0', url],
+                capture_output=True, text=True, timeout=20)
+            html = r.stdout
+            idx = html.find('OPTIONS (PUT)')
+            if idx < 0:
+                continue  # 这天没数据，试前一天
+            chunk = html[idx:idx+80000]
+            lines = re.sub(r'<[^>]+>', '|', chunk)
+            lines = re.sub(r'\|+', '|', lines).split('|')
+            data = {}
+            i = 0
+            while i < len(lines):
+                s = lines[i].strip()
+                m = re.match(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2})(?:\s+w\d)?\s*(?:&nbsp;)*\s*([\d,]+(?:\.\d+)?)', s)
+                if m:
+                    exp = m.group(1)
+                    strike_s = m.group(2).replace(',', '')
+                    strike = float(strike_s)
+                    if strike < 100:
+                        i += 1
+                        continue
+                    fields = []
+                    j = i + 1
+                    while j < len(lines) and len(fields) < 8:
+                        f = lines[j].strip()
+                        if f and f != '&nbsp;':
+                            fields.append(f)
+                        j += 1
+                    close = float(fields[0].replace(',', '')) if fields and fields[0] != '-' else None
+                    iv = float(fields[4]) / 100 if len(fields) > 4 and fields[4] != '-' else None
+                    delta = float(fields[5]) if len(fields) > 5 and fields[5] != '-' else None
+                    oi = int(fields[7].replace(',', '')) if len(fields) > 7 and fields[7] != '-' else 0
+                    if close and iv and strike > 5000:
+                        data.setdefault(exp, []).append(dict(strike=strike, close=close, iv=iv, delta=delta, oi=oi))
+                i += 1
+            if data:
+                if days_back > 0:
+                    print(f'  MEFF: 今日公报无数据，使用{d.strftime("%A")}({d.strftime("%m-%d")})的公报')
+                return data
+        except Exception:
+            continue
+    return None
 
 def pick_expiry(meff_data):
     """选择最接近1年的到期月"""
@@ -182,6 +194,37 @@ def bs_put(S, K, T, r=ECB_RATE, sigma=None):
     return K*math.exp(-r*T)*norm_cdf(-d2) - S*norm_cdf(-d1)
 
 
+def update_csv_with_live(live):
+    """将 live NAV 数据追加到 CSV 文件，避免数据缺口"""
+    if not live or 'fund_nav' not in live or 'fund_date' not in live:
+        return
+    # 只有真正从数据源抓到的NAV才写CSV，fallback值不写（避免污染数据）
+    if live.get('fund_date') == '?' or live.get('_fund_is_fallback'):
+        return
+    csv_path = os.path.join(DATA_DIR, 'PTOPZWHM0007_daily_2022-2026.csv')
+    fund = pd.read_csv(csv_path, parse_dates=['Date'])
+    live_dt = pd.Timestamp(live['fund_date'])
+    # 只追加CSV中还没有的日期
+    if live_dt not in fund['Date'].values:
+        nav = live['fund_nav']
+        new_row = pd.DataFrame({'Date': [live_dt], 'Open': [nav], 'High': [nav],
+                                'Low': [nav], 'Close': [nav], 'Volume': [0]})
+        fund = pd.concat([fund, new_row], ignore_index=True)
+        fund = fund.sort_values('Date').reset_index(drop=True)
+        fund.to_csv(csv_path, index=False)
+        print(f"  CSV已追加 {live['fund_date']} NAV={nav}")
+    # 同步更新 2024-2026 版本
+    csv2 = os.path.join(DATA_DIR, 'PTOPZWHM0007_daily_2024-2026.csv')
+    if os.path.exists(csv2):
+        f2 = pd.read_csv(csv2, parse_dates=['Date'])
+        if live_dt not in f2['Date'].values and live_dt >= pd.Timestamp('2024-01-01'):
+            nav = live['fund_nav']
+            new_row = pd.DataFrame({'Date': [live_dt], 'Open': [nav], 'High': [nav],
+                                    'Low': [nav], 'Close': [nav], 'Volume': [0]})
+            f2 = pd.concat([f2, new_row], ignore_index=True)
+            f2 = f2.sort_values('Date').reset_index(drop=True)
+            f2.to_csv(csv2, index=False)
+
 def load_data(live=None):
     fund = pd.read_csv(os.path.join(DATA_DIR, 'PTOPZWHM0007_daily_2022-2026.csv'), parse_dates=['Date'])
     fund = fund.sort_values('Date').reset_index(drop=True)
@@ -195,12 +238,11 @@ def load_data(live=None):
     psi.columns = [c[0] for c in psi.columns]
     psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
     psi['Date'] = psi['Date'].dt.normalize()
-    # 追加live数据到fund_df，确保事件检测覆盖最新交易日
+    # 追加live数据到fund_df（内存中），确保事件检测覆盖最新交易日
     if live and 'fund_nav' in live and 'fund_date' in live:
         live_dt = pd.Timestamp(live['fund_date'])
         if fund['Date'].iloc[-1] < live_dt:
             live_row = pd.DataFrame({'Date': [live_dt], 'Close': [live['fund_nav']]})
-            # 补齐CSV中可能有的其他列
             for col in fund.columns:
                 if col not in live_row.columns:
                     live_row[col] = np.nan
@@ -762,7 +804,7 @@ body.lang-zh .en{{display:none}}
   <div class="src">
     {t('数据来源：基金NAV','Data Source: Fund NAV')} &larr; <b>{live['fund_src']}</b> &middot; {t('指数','Indices')} &larr; <b>Yahoo Finance</b><br>
     <span style="font-size:11px;color:#aaa">
-      {t('基金NAV','Fund NAV')}: {live['fund_date']} &middot;
+      {t('基金NAV','Fund NAV')}: {live['fund_date']}{f' <span style="color:#e65100;font-weight:700">⚠ {t("NAV滞后" + str(live.get("fund_lag", 0)) + "天，基金公司延迟发布", "NAV delayed " + str(live.get("fund_lag", 0)) + " days")}</span>' if live.get('fund_lag', 0) >= 2 else ''} &middot;
       PSI20: {live['psi_date']} &middot;
       IBEX35: {live['ibex_date']} &middot;
       ESTOXX50: {live['estx_date']}
@@ -1563,15 +1605,24 @@ def main():
     print('获取实时价格...')
     prices = fetch_live_prices()
     fund_nav = prices.get('fund', 17.15)  # fallback
+    _fund_is_fallback = 'fund' not in prices
     psi_now = prices.get('psi', 8862)
     ibex_now = prices.get('ibex', 17062)
     estx_now = prices.get('estx', 6138)
     fund_value = round(fund_nav * FUND_UNITS)
     gen_time = datetime.now().strftime('%Y-%m-%d %H:%M')
     fund_src = prices.get('fund_src', 'Yahoo Finance')
+    # 计算NAV滞后天数（工作日口径）
+    fund_lag = 0
+    fund_date_str = prices.get('fund_date', '?')
+    if fund_date_str != '?':
+        fund_dt = datetime.strptime(fund_date_str, '%Y-%m-%d').date()
+        today = datetime.now().date()
+        fund_lag = (today - fund_dt).days
     live = dict(fund_nav=fund_nav, fund_value=fund_value, psi=psi_now,
                 ibex=ibex_now, estx=estx_now, gen_time=gen_time, fund_src=fund_src,
-                fund_date=prices.get('fund_date','?'),
+                fund_date=fund_date_str, fund_lag=fund_lag,
+                _fund_is_fallback=_fund_is_fallback,
                 psi_date=prices.get('psi_date','?'),
                 ibex_date=prices.get('ibex_date','?'),
                 estx_date=prices.get('estx_date','?'))
@@ -1594,6 +1645,9 @@ def main():
     live['meff_source'] = _meff_source
     live['meff_expiry'] = _meff_expiry or 'N/A'
     live['meff_points'] = _meff_iv_points
+
+    # 将live NAV写入CSV，避免数据缺口
+    update_csv_with_live(live)
 
     print('加载历史数据...')
     fund_df, ibex_df, psi_df = load_data(live)
