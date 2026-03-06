@@ -1983,9 +1983,14 @@ h1{font-size:24px;font-weight:800;color:#1a237e;margin-bottom:4px}
 .kv .k{color:#888}.kv .v{font-weight:700}
 .signal{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:700}
 .sig-low{background:#e8f5e9;color:#2e7d32}.sig-mid{background:#fff8e1;color:#f57f17}.sig-hi{background:#fdecea;color:#c62828}
+.s-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.s-card{background:white;border-radius:12px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,0.07);text-align:center}
+.s-label{font-size:11px;color:#999;margin-bottom:4px;letter-spacing:.5px}
+.s-val{font-size:24px;font-weight:800;margin-bottom:2px}
+.s-sub{font-size:11px;color:#bbb}
 body.lang-en .zh{display:none}
 body.lang-zh .en{display:none}
-@media(max-width:700px){.detail-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.detail-grid{grid-template-columns:1fr}.s-cards{grid-template-columns:1fr 1fr}}
 </style></head><body class="lang-zh">
 <div class="page">
 <div class="nav">
@@ -1994,10 +1999,12 @@ body.lang-zh .en{display:none}
   <button class="lang-btn" id="lang-btn" onclick="toggleLang()">EN</button>
 </div>
 <h1><span class="zh">历史保费跟踪</span><span class="en">Premium Tracker</span></h1>
-<p class="meta"><span class="zh">追踪方案A/B保费成本随时间变化，帮你选择IV低位入场</span><span class="en">Track Plan A/B premium costs over time — enter when IV is low</span></p>
+<p class="meta"><span class="zh">追踪方案A/B保费总成本随时间变化，帮你选择IV低位入场。点击图上数据点查看详情。</span><span class="en">Track Plan A/B total premium cost over time — enter when IV is low. Click data points for details.</span></p>
+
+<div id="summary-cards" class="s-cards"></div>
 
 <div class="chart-box"><div id="chart-prem" style="height:400px"></div></div>
-<div class="chart-box"><div id="chart-iv" style="height:300px"></div></div>
+<div class="chart-box"><div id="chart-iv" style="height:280px"></div></div>
 
 <div class="detail-panel" id="detail">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -2070,64 +2077,79 @@ else document.querySelector('.page').innerHTML += '<div style="color:#888;paddin
 
 function renderCharts(){
   if(!DATA.length) return;
-  var ts=[], ibex=[], bsA=[], bsB=[], meffA=[], meffB=[], ivAtm=[], ivOtm=[];
+  var ts=[], costA=[], costB=[], ivAtm=[], ivOtm=[], ibex=[];
+  // 最新一条数据用于顶部卡片
+  var latest = DATA[DATA.length-1];
   DATA.forEach(function(d){
     ts.push(d.ts);
-    ibex.push(d.ibex);
-    bsA.push(d.bs_a_raw);
-    bsB.push(d.bs_b_raw);
-    meffA.push(d.meff_a);
-    meffB.push(d.meff_b);
+    // 实际成本：优先MEFF Ask，没有时用BS
+    costA.push(d.meff_a || d.bs_a_raw);
+    costB.push(d.meff_b || d.bs_b_raw);
     ivAtm.push(d.iv_atm);
     ivOtm.push(d.iv_otm);
-  });
-  // Premium chart
-  var traces = [
-    {x:ts, y:meffA, name:T('方案A MEFF Ask','Plan A MEFF Ask'), line:{color:'#2e7d32',width:2.5}, connectgaps:false,
-     hovertemplate:'%{x}<br>'+T('方案A','Plan A')+' MEFF: €%{y:,}<extra></extra>'},
-    {x:ts, y:meffB, name:T('方案B MEFF Ask','Plan B MEFF Ask'), line:{color:'#e65100',width:2.5}, connectgaps:false,
-     hovertemplate:'%{x}<br>'+T('方案B','Plan B')+' MEFF: €%{y:,}<extra></extra>'},
-    {x:ts, y:bsA, name:T('方案A BS理论','Plan A BS Theory'), line:{color:'#2e7d32',width:1.5,dash:'dot'}, opacity:0.5,
-     hovertemplate:'%{x}<br>'+T('方案A','Plan A')+' BS: €%{y:,}<extra></extra>'},
-    {x:ts, y:bsB, name:T('方案B BS理论','Plan B BS Theory'), line:{color:'#e65100',width:1.5,dash:'dot'}, opacity:0.5,
-     hovertemplate:'%{x}<br>'+T('方案B','Plan B')+' BS: €%{y:,}<extra></extra>'},
-    {x:ts, y:ibex, name:'IBEX35', yaxis:'y2', line:{color:'#1a237e',width:1.5,dash:'dash'}, opacity:0.6,
-     hovertemplate:'%{x}<br>IBEX: %{y:,.0f}<extra></extra>'}
-  ];
-  Plotly.newPlot('chart-prem', traces, {
-    template:'plotly_white', height:400,
-    title:{text:T('本轮保费（单轮成本）','Round Premium (Single-Round Cost)'), font:{size:15,color:'#1a237e'}},
-    yaxis:{title:T('保费 (EUR)','Premium (EUR)'), tickformat:',', side:'left'},
-    yaxis2:{title:'IBEX35', overlaying:'y', side:'right', tickformat:',', showgrid:false},
-    legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
-    margin:{t:40,b:40,l:70,r:70}, hovermode:'x unified',
-    xaxis:{type:'category', tickangle:-45, nticks:20}
-  }, {responsive:true});
-  // Click handler
-  document.getElementById('chart-prem').on('plotly_click', function(ev){
-    var idx = ev.points[0].pointIndex;
-    showDetail(idx);
+    ibex.push(d.ibex);
   });
 
-  // IV chart
-  Plotly.newPlot('chart-iv', [
-    {x:ts, y:ivAtm, name:'ATM IV%', line:{color:'#1565c0',width:2.5},
-     hovertemplate:'%{x}<br>ATM IV: %{y:.1f}%<extra></extra>'},
-    {x:ts, y:ivOtm, name:'90%OTM IV%', line:{color:'#c62828',width:2.5},
-     hovertemplate:'%{x}<br>OTM IV: %{y:.1f}%<extra></extra>'},
-    {x:ts, y:ibex.map(function(v){return v}), name:'IBEX35', yaxis:'y2',
-     line:{color:'#1a237e',width:1.5,dash:'dash'}, opacity:0.5,
-     hovertemplate:'%{x}<br>IBEX: %{y:,.0f}<extra></extra>'}
+  // ═══ 顶部摘要卡片 ═══
+  var latCostA = latest.meff_a || latest.bs_a_raw;
+  var latCostB = latest.meff_b || latest.bs_b_raw;
+  var src = latest.meff_a ? 'MEFF Ask' : 'BS';
+  var ivSig = latest.iv_atm < 16 ? 'sig-low' : (latest.iv_atm > 20 ? 'sig-hi' : 'sig-mid');
+  var ivWord = latest.iv_atm < 16 ? T('低位','Low') : (latest.iv_atm > 20 ? T('偏高','High') : T('正常','Normal'));
+  document.getElementById('summary-cards').innerHTML =
+    '<div class="s-card"><div class="s-label">'+T('方案A 本轮成本','Plan A Round Cost')+'</div>' +
+    '<div class="s-val" style="color:#2e7d32">€'+latCostA.toLocaleString()+'</div>' +
+    '<div class="s-sub">ATM×8 + OTM×20 · '+src+'</div></div>' +
+    '<div class="s-card"><div class="s-label">'+T('方案B 本轮成本','Plan B Round Cost')+'</div>' +
+    '<div class="s-val" style="color:#e65100">€'+latCostB.toLocaleString()+'</div>' +
+    '<div class="s-sub">OTM×24 · '+src+'</div></div>' +
+    '<div class="s-card"><div class="s-label">ATM IV</div>' +
+    '<div class="s-val"><span class="signal '+ivSig+'">'+latest.iv_atm+'%</span></div>' +
+    '<div class="s-sub">'+ivWord+'</div></div>' +
+    '<div class="s-card"><div class="s-label">IBEX35</div>' +
+    '<div class="s-val" style="color:#1a237e">'+latest.ibex.toLocaleString()+'</div>' +
+    '<div class="s-sub">'+latest.ts+'</div></div>';
+
+  // ═══ 主图：方案A/B保费总成本走势 ═══
+  var mode = DATA.length === 1 ? 'markers+text' : 'lines+markers';
+  Plotly.newPlot('chart-prem', [
+    {x:ts, y:costA, name:T('方案A (ATM×8+OTM×20)','Plan A (ATM×8+OTM×20)'),
+     mode:mode, line:{color:'#2e7d32',width:3}, marker:{size:8},
+     text:costA.map(function(v){return '€'+v.toLocaleString()}), textposition:'top center',
+     hovertemplate:'%{x}<br>'+T('方案A: €%{y:,}','Plan A: €%{y:,}')+'<extra></extra>'},
+    {x:ts, y:costB, name:T('方案B (OTM×24)','Plan B (OTM×24)'),
+     mode:mode, line:{color:'#e65100',width:3}, marker:{size:8},
+     text:costB.map(function(v){return '€'+v.toLocaleString()}), textposition:'bottom center',
+     hovertemplate:'%{x}<br>'+T('方案B: €%{y:,}','Plan B: €%{y:,}')+'<extra></extra>'}
   ], {
-    template:'plotly_white', height:300,
-    title:{text:T('隐含波动率 (IV) 走势','Implied Volatility (IV) Trend'), font:{size:15,color:'#1a237e'}},
-    yaxis:{title:'IV (%)', range:[10,35]},
-    yaxis2:{title:'IBEX35', overlaying:'y', side:'right', tickformat:',', showgrid:false},
+    template:'plotly_white', height:400,
+    title:{text:T('保费总成本走势（单轮，MEFF实价优先）','Premium Cost Trend (Per Round, MEFF Ask Priority)'), font:{size:15,color:'#1a237e'}},
+    yaxis:{title:T('保费 (EUR)','Premium (EUR)'), tickformat:','},
     legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
-    margin:{t:40,b:40,l:60,r:70}, hovermode:'x unified',
+    margin:{t:50,b:40,l:70,r:20}, hovermode:'x unified',
+    xaxis:{type:'category', tickangle:-45, nticks:20}
+  }, {responsive:true});
+  document.getElementById('chart-prem').on('plotly_click', function(ev){
+    showDetail(ev.points[0].pointIndex);
+  });
+
+  // ═══ IV走势图 ═══
+  Plotly.newPlot('chart-iv', [
+    {x:ts, y:ivAtm, name:'ATM IV%', mode:mode, line:{color:'#1565c0',width:2.5}, marker:{size:6},
+     hovertemplate:'%{x}<br>ATM IV: %{y:.1f}%<extra></extra>'},
+    {x:ts, y:ivOtm, name:'90%OTM IV%', mode:mode, line:{color:'#c62828',width:2.5}, marker:{size:6},
+     hovertemplate:'%{x}<br>OTM IV: %{y:.1f}%<extra></extra>'}
+  ], {
+    template:'plotly_white', height:280,
+    title:{text:T('隐含波动率 (IV)','Implied Volatility (IV)'), font:{size:15,color:'#1a237e'}},
+    yaxis:{title:'IV (%)', range:[10,35]},
+    legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
+    margin:{t:50,b:40,l:60,r:20}, hovermode:'x unified',
     xaxis:{type:'category', tickangle:-45, nticks:20},
-    shapes:[{type:'line',y0:16,y1:16,x0:0,x1:1,xref:'paper',line:{color:'#2e7d32',width:1,dash:'dot'}},
-            {type:'line',y0:20,y1:20,x0:0,x1:1,xref:'paper',line:{color:'#c62828',width:1,dash:'dot'}}]
+    shapes:[{type:'line',y0:16,y1:16,x0:0,x1:1,xref:'paper',line:{color:'#2e7d32',width:1,dash:'dot'},
+             label:{text:'16%',position:'start',font:{size:10,color:'#2e7d32'}}},
+            {type:'line',y0:20,y1:20,x0:0,x1:1,xref:'paper',line:{color:'#c62828',width:1,dash:'dot'},
+             label:{text:'20%',position:'start',font:{size:10,color:'#c62828'}}}]
   }, {responsive:true});
 }
 
