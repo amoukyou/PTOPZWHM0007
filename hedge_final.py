@@ -606,6 +606,8 @@ def chart_payoff(rec, live):
         hovertemplate='PSI20:%{x:,.0f}<br>混合:€%{y:,.0f}<extra></extra>'))
     fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
         annotation_text=f'当前€{fv:,}', annotation_position='top left', annotation_font=dict(size=10,color='gray'))
+    fig.add_hline(y=INITIAL_INV, line_dash='dash', line_color='#c62828', opacity=0.5,
+        annotation_text=f'买入成本€{INITIAL_INV:,}', annotation_position='bottom left', annotation_font=dict(size=10,color='#c62828'))
     fig.add_vline(x=psi_now, line_dash='dot', line_color='gray', opacity=0.4,
         annotation_text=f'当前PSI20 {psi_now:,.0f}', annotation_position='top right', annotation_font=dict(size=10,color='gray'))
     for level in [8000, 7000]:
@@ -640,6 +642,8 @@ def chart_payoff_planb(rec, live):
         hovertemplate='PSI20:%{x:,.0f}<br>OTM:€%{y:,.0f}<extra></extra>'))
     fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
         annotation_text=f'当前€{fv:,}', annotation_position='top left', annotation_font=dict(size=10,color='gray'))
+    fig.add_hline(y=INITIAL_INV, line_dash='dash', line_color='#c62828', opacity=0.5,
+        annotation_text=f'买入成本€{INITIAL_INV:,}', annotation_position='bottom left', annotation_font=dict(size=10,color='#c62828'))
     fig.add_vline(x=psi_now, line_dash='dot', line_color='gray', opacity=0.4,
         annotation_text=f'当前PSI20 {psi_now:,.0f}', annotation_position='top right', annotation_font=dict(size=10,color='gray'))
     for level in [8000, 7000]:
@@ -1009,7 +1013,8 @@ body.lang-zh .en{{display:none}}
     <button class="plan-btn" id="btn-b" onclick="switchPlan('b')">
       B: {t('纯OTM 省钱版','Pure OTM Budget')}<br><span style="font-size:11px;font-weight:400">{t('只防崩盘，成本低约25-40%','Crash-only protection, ~25-40% cheaper')}</span>
     </button>
-    <button class="lang-btn" id="lang-btn" onclick="toggleLang()" style="margin-left:auto;padding:8px 16px;border:2px solid #1a237e;border-radius:8px;background:white;cursor:pointer;font-size:13px;font-weight:700;color:#1a237e">EN</button>
+    <a href="premium.html" id="link-prem" style="margin-left:auto;padding:8px 16px;border:2px solid #6a1b9a;border-radius:8px;background:#f3e5f5;color:#6a1b9a;font-size:13px;font-weight:700;text-decoration:none;cursor:pointer">{t('历史保费跟踪','Premium Tracker')} &rarr;</a>
+    <button class="lang-btn" id="lang-btn" onclick="toggleLang()" style="padding:8px 16px;border:2px solid #1a237e;border-radius:8px;background:white;cursor:pointer;font-size:13px;font-weight:700;color:#1a237e">EN</button>
   </div>
 </div>
 
@@ -1058,12 +1063,12 @@ body.lang-zh .en{{display:none}}
 
 <div class="alert a-note" style="font-size:14px;line-height:1.8;border:2px solid #7b1fa2;border-radius:12px;padding:16px 20px">
   <b style="font-size:16px;color:#4a148c">{t('一分钟决策摘要','1-Minute Decision Summary')}</b><br>
-  <b>{t('方案A','Plan A')}</b>{t('：买','：Buy ')}<b>ATM Put &times;8 + 90%OTM Put &times;20</b>{t(f'，到期月{put_expiry_label}，实际花费约',f', expiry {put_expiry_label}, actual cost ~')}<b style="color:#c62828">{f"€{round(_real_atm_ask*8+_real_otm_ask*20):,}" if _real_atm_ask and _real_otm_ask else f"€{rec_prem_raw:,}(BS)"}</b>{t(f'（{T_months}个月），小跌+大跌都保护',f' ({T_months}mo), protects both small &amp; large drops')}<br>
-  <b style="color:#e65100">{t('方案B','Plan B')}</b>{t('：买','：Buy ')}<b>90%OTM Put &times;24</b>{t(f'，到期月{put_expiry_label}，实际花费约',f', expiry {put_expiry_label}, actual cost ~')}<b style="color:#c62828">{f"€{round(_real_otm_ask*24):,}" if _real_otm_ask else f"€{planb_prem_raw:,}(BS)"}</b>{t(f'（{T_months}个月），只防崩盘、成本更低',f' ({T_months}mo), crash-only, lower cost')}<br>
-  <span style="font-size:12px;color:#888">{t('这是减震垫，不是全额保险。覆盖率24%-57%，R&sup2;=42%，58%的风险无法覆盖。详见下方分析。','This is a shock absorber, not full insurance. Coverage 24%-57%, R&sup2;=42%, 58% of risk uncovered. See analysis below.')}</span><br>
+  <b>{t('花多少钱','Cost')}</b>{t('：',': ')}<b style="color:#c62828">{f"€{round(_real_atm_ask*8+_real_otm_ask*20):,}" if _real_atm_ask and _real_otm_ask else f"€{rec_prem_raw:,}"}</b>{t(f'/{T_months}个月（方案A）或',f'/{T_months}mo (Plan A) or ')}<b style="color:#c62828">{f"€{round(_real_otm_ask*24):,}" if _real_otm_ask else f"€{planb_prem_raw:,}"}</b>{t(f'/{T_months}个月（方案B，只防崩盘）',f'/{T_months}mo (Plan B, crash-only)')}<br>
+  <b>{t('保什么','Protects')}</b>{t('：IBEX暴跌>10%时赔付，覆盖基金约40-57%的<b>IBEX相关损失</b>（R&sup2;=42%）',': Payout when IBEX drops >10%, covering ~40-57% of <b>IBEX-related losses</b> (R&sup2;=42%)')}<br>
+  <b>{t('不保什么','Does NOT protect')}</b>{t('：基金自身风险（总风险的58%）、小跌（方案B <10%不赔）、先涨后跌场景（Put行权价被甩开）',': Fund-specific risk (58% of total), small drops (Plan B: no payout <10%), rally-then-crash (strike left behind)')}<br>
   <span style="display:flex;gap:8px;margin-top:6px">
-    <a href="javascript:switchPlan('a');void(0)" style="padding:6px 16px;background:#e8f5e9;border:2px solid #388e3c;border-radius:8px;color:#1b5e20;font-weight:700;text-decoration:none;font-size:13px">{t('查看方案A详情','View Plan A Details')} &darr;</a>
-    <a href="javascript:switchPlan('b');void(0)" style="padding:6px 16px;background:#fff3e0;border:2px solid #e65100;border-radius:8px;color:#e65100;font-weight:700;text-decoration:none;font-size:13px">{t('查看方案B详情','View Plan B Details')} &darr;</a>
+    <a href="javascript:switchPlan('a');void(0)" style="padding:6px 16px;background:#e8f5e9;border:2px solid #388e3c;border-radius:8px;color:#1b5e20;font-weight:700;text-decoration:none;font-size:13px">{t('方案A详情','Plan A Details')} &darr;</a>
+    <a href="javascript:switchPlan('b');void(0)" style="padding:6px 16px;background:#fff3e0;border:2px solid #e65100;border-radius:8px;color:#e65100;font-weight:700;text-decoration:none;font-size:13px">{t('方案B详情','Plan B Details')} &darr;</a>
   </span>
 </div>
 </div>
@@ -1120,6 +1125,10 @@ body.lang-zh .en{{display:none}}
   {t('学术背景：危机中跨市场相关性上升是公认现象（Longin &amp; Solnik 2001）。条件Beta &gt; 无条件Beta是正常的。','Academic background: Rising cross-market correlation during crises is well-documented (Longin &amp; Solnik 2001). Conditional Beta &gt; unconditional Beta is expected.')}
   {t('但'+str(ncr)+'次样本量偏小（比率范围'+cr_min+'~'+cr_max+'），不宜过度精确化。','However, '+str(ncr)+' samples is small (ratio range '+cr_min+'~'+cr_max+'), so over-precision is unwarranted.')}
   {t('本报告仍以全样本Beta定合约数，但提醒用户实际覆盖率可能低于理论值。','This report still uses full-sample Beta for contract sizing, but reminds users actual coverage may be lower than theoretical.')}</span>
+</div>
+<div class="alert a-warn" style="font-size:13px">
+  <b>{t('Beta稳定性警告','Beta Stability Warning')}</b>{t('：上述Beta基于2022年至今约3年数据回归，恰逢后疫情复苏+俄乌战争期间——这一特殊周期内欧洲市场相关性可能偏高。Beta在不同市场周期中并不稳定：如果未来进入结构性分化（如葡萄牙与西班牙经济脱钩），实际Beta可能显著偏离历史值。',': The above Betas are regressed on ~3 years of data (2022–present), coinciding with post-COVID recovery + Ukraine war — a period when European market correlations may be elevated. Beta is NOT stable across market regimes: if structural divergence occurs (e.g., Portugal-Spain economic decoupling), actual Beta may deviate significantly from historical values.')}<br>
+  {t('建议：每6个月用最新数据重算Beta，如果R&sup2;降至30%以下或Beta偏移超过20%，应重新评估整个对冲方案。','Recommendation: Recalculate Beta every 6 months with latest data. If R&sup2; drops below 30% or Beta shifts more than 20%, the entire hedge strategy should be reassessed.')}
 </div>
 </div>
 
@@ -1226,7 +1235,8 @@ body.lang-zh .en{{display:none}}
 <div class="alert a-warn" style="font-size:13px">
   <b>{t('线性模型局限','Linear Model Limitation')}</b>{t('：上表覆盖率随跌幅递增——小跌时8张ATM独扛（覆盖率低），大跌时20张OTM逐步启动、赔付加速上升（覆盖率可达50%以上）。这正是混合行权价策略的优势。',': Coverage in the table above increases with drop size — in small drops only 8 ATM contracts carry the load (low coverage), while in large drops the 20 OTM contracts progressively activate with accelerating payout (coverage can exceed 50%). This is the advantage of a mixed-strike strategy.')}<br>
   {t('但模型使用恒定Beta，极端行情下Beta会漂移、尾部相关性变化，实际覆盖率可能偏离。实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时覆盖率可能','The model uses constant Beta, but in extreme conditions Beta drifts and tail correlations change, so actual coverage may deviate. Empirical research shows cross-market correlation rises during crises (Longin &amp; Solnik 2001), so coverage in large drops may be')}<b>{t('高于','higher than')}</b>{t('此估计。',' this estimate.')}<br>
-  <b>{t('更重要的是','More importantly')}</b>{t('：此表假设Put行权价在事件发生时仍为ATM/OTM。如果IBEX在持有期内先涨后跌（如Event #10），行权价被甩开变成深度虚值，实际覆盖率可能远低于表中数值。见下方"局限性"详细分析。',': This table assumes Put strikes remain ATM/OTM when the event occurs. If IBEX rallies then crashes during the holding period (e.g., Event #10), strikes get left behind as deep OTM, and actual coverage could be far lower than shown. See "Limitations" section below.')}
+  <b>{t('更重要的是','More importantly')}</b>{t('：此表假设Put行权价在事件发生时仍为ATM/OTM。如果IBEX在持有期内先涨后跌（如Event #10），行权价被甩开变成深度虚值，实际覆盖率可能远低于表中数值。见下方"局限性"详细分析。',': This table assumes Put strikes remain ATM/OTM when the event occurs. If IBEX rallies then crashes during the holding period (e.g., Event #10), strikes get left behind as deep OTM, and actual coverage could be far lower than shown. See "Limitations" section below.')}<br>
+  <span style="font-size:12px;color:#888">{t('精度提醒：Beta回归的标准误约±0.05，意味着PSI20跌30%时基金预估值可能偏差±€15,000~20,000。表中数字请当作量级参考，而非精确预测。','Precision note: Beta regression standard error is ~±0.05, meaning at PSI20 -30% the fund estimate may deviate by ±€15,000-20,000. Treat table figures as order-of-magnitude guidance, not precise forecasts.')}</span>
 </div>
 <div class="chart-box"><div id="c5" style="height:360px"></div></div>
 
@@ -1313,7 +1323,7 @@ body.lang-zh .en{{display:none}}
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
   <b>{t('分腿滚仓的成本优势','Cost Advantage of Split-Leg Rolling')}</b>{t('：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。',': Each dynamic trigger only rolls 8 ATM contracts (not all 28), significantly reducing rolling costs.')}
-  <span style="font-size:11px;color:#888">({t('下方滚仓损耗按"损失旧Put约40%时间价值"粗略估算，实际取决于剩余期限、IV水平和bid-ask spread，视市场条件而定。','Rolling cost below is a rough estimate based on "losing ~40% of old Put time value"; actual cost depends on remaining maturity, IV level, and bid-ask spread, varying with market conditions.')})</span><br>
+  <span style="font-size:11px;color:#c62828;font-weight:700">({t('下方滚仓损耗按"损失旧Put约40%时间价值"粗略估算，可能严重低估。当IBEX涨10%触发动态滚仓时，ATM Put已变成OTM，剩余6个月的OTM Put可能只值原价的20-30%（即损失70-80%）。实际滚仓成本取决于剩余期限、IV水平、moneyness和bid-ask spread。','Rolling cost below is a rough estimate based on "losing ~40% of old Put time value", which may significantly underestimate. When IBEX rises 10% triggering a dynamic roll, the ATM Put has become OTM; a 6-month remaining OTM Put may be worth only 20-30% of original price (i.e., 70-80% loss). Actual rolling cost depends on remaining maturity, IV level, moneyness, and bid-ask spread.')})</span><br>
   &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,T_put)):,}&times;40% = <b><span id="dyn-s7-roll-full">&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,T_put)*20*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-full-yr">&euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,T_put)*20*0.4)*2):,}</span>/{t('年','yr')}<br>
   &middot; <b>{t('分腿滚仓','Split-Leg Rolling')}</b>{t('（推荐）：只滚8张ATM，单次损耗',' (recommended): only roll 8 ATM, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b><span id="dyn-s7-roll-split">&euro;{round(rec['price']*8*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-split-yr">&euro;{round(rec['price']*8*0.4*2):,}</span>/{t('年','yr')}<br>
   &middot; <b>{t('每年节省约','Annual savings ~')}<span id="dyn-s7-roll-save">&euro;{round(bs_put(ibex_now,K_90,T_put)*20*0.4*2):,}</span></b>{t('，5年节省约',', 5-year savings ~')}<span id="dyn-s7-roll-save-5yr">&euro;{round(bs_put(ibex_now,K_90,T_put)*20*0.4*2*5):,}</span><br><br>
@@ -1346,6 +1356,11 @@ body.lang-zh .en{{display:none}}
 
 <div class="section">
 <h2>{t('八、局限性（必读）','Section 8: Limitations (Must Read)')}</h2>
+<div class="alert a-bad" style="border:3px solid #c62828;font-size:14px">
+  <b style="font-size:16px">{t('欧式期权不可提前行权——V型反弹风险','European Options Cannot Be Exercised Early — V-Shape Reversal Risk')}</b><br>
+  {t('Mini IBEX Put为<b>欧式期权</b>，即使暴跌时深度实值，也<b>无法提前行权</b>，只能在MEFF市场卖出平仓（取决于做市商报价和流动性）。如果市场暴跌后快速V型反弹（如2020年3月IBEX在两周内反弹20%+），到期时Put可能回到虚值而<b>归零</b>。','Mini IBEX Puts are <b>European-style</b> — even when deep in-the-money during a crash, they <b>cannot be exercised early</b>. You can only sell to close on the MEFF market (dependent on market maker quotes and liquidity). If the market crashes then rapidly V-rebounds (e.g., IBEX rebounded 20%+ in two weeks in March 2020), the Put may return to OTM and <b>expire worthless</b>.')}<br>
+  <b>{t('应对策略','Mitigation')}</b>{t('：暴跌发生时立即在MEFF市场挂单卖出Put锁定利润，不要等到期。但恐慌期做市商spread可能极大（€100+/张），实际变现价格可能远低于理论内在价值。',': When a crash occurs, immediately place limit orders on MEFF to sell Puts and lock in profits — do NOT wait for expiry. However, panic-period market maker spreads can be extreme (€100+/contract), so the actual realized price may be far below theoretical intrinsic value.')}
+</div>
 <div class="alert a-bad">
   <b>{t('Event #10 教训：年度滚仓的致命缺陷','Event #10 Lesson: Fatal Flaw of Annual Rolling')}</b><br>
   {t('2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在2024年7月买入时的IBEX水平（约11,090点，注意：这是历史回测值，当前推荐行权价为'+f'{rec["K"]:,}'+'点），到事件发生时IBEX已涨到13,484点，即使跌到11,786点仍在行权价','In Mar-Apr 2025, the fund dropped 7.4% (~&euro;49,000), the largest drawdown during the holding period. But the 12M ATM Put strike was set at the July 2024 entry IBEX level (~11,090 pts, note: this is historical backtest value, current recommended strike is '+f'{rec["K"]:,}'+' pts). By the event, IBEX had rallied to 13,484 — even after dropping to 11,786 it was still')}<b>{t('之上','above the strike')}</b>{t('——Put几乎是废纸，覆盖仅约5%。',' — the Put was nearly worthless, covering only ~5%.')}<br><br>
@@ -1360,8 +1375,28 @@ body.lang-zh .en{{display:none}}
     <li><b>{t('线性模型在极端行情下失真','Linear model breaks down in extreme conditions')}</b>{t('：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。',': Scenario tables use constant Beta, but in extreme tail events Beta drifts and coverage may deviate from expectations.')}</li>
     <li><b>{t('IV影响成本','IV affects cost')}</b>{t('：恐慌期Put更贵，尽量在平静期滚仓。',': Puts are more expensive during panic periods. Try to roll during calm markets.')}</li>
     <li><b>{t('MEFF流动性有限','Limited MEFF liquidity')}</b>{t('：Mini IBEX期权的做市商报价spread约€30-60/张（正常时期），恐慌期可能显著扩大。部分行权价只有Ask没有Bid。如需在恐慌期滚仓或卖出，可能承受较大滑点成本。',': Mini IBEX option market maker spreads are ~€30-60/contract (normal conditions), potentially widening significantly during panic. Some strikes have Ask but no Bid. Rolling or selling during panic periods may incur substantial slippage costs.')}</li>
-    <li><b>{t('欧式期权不可提前行权','European options cannot be exercised early')}</b>{t('：Mini IBEX Put为欧式期权，即使在市场暴跌时已深度实值，也无法提前行权——只能在MEFF市场上卖出平仓（价格取决于做市商报价）。在V型反转（暴跌后快速反弹）中，到期时Put可能回到虚值而归零。',': Mini IBEX Puts are European-style — even when deep in-the-money during a crash, they cannot be exercised early. You can only sell to close on the MEFF market (price depends on market maker quotes). In a V-shaped recovery (crash then rapid rebound), the Put may return to OTM and expire worthless.')}</li>
+    <li><b>{t('欧式期权风险','European Option Risk')}</b>{t('：详见上方红色警告框。暴跌时务必主动卖出锁利，不要等到期。',': See red warning box above. During crashes, actively sell to lock in profits — do NOT wait for expiry.')}</li>
   </ol>
+</div>
+</div>
+
+<div class="section">
+<h2>{t('八B、不对冲 vs 对冲：你真的需要这份保险吗？','Section 8B: No Hedge vs Hedge — Do You Really Need This Insurance?')}</h2>
+<div class="alert a-info" style="font-size:14px;line-height:1.9">
+  <b>{t('选项零：不对冲','Option Zero: No Hedge')}</b><br>
+  {t('5年不买Put，省下的保费本身就是缓冲：','5 years of saved premium is itself a buffer:')}<br>
+  &middot; {t('方案A','Plan A')}: {t('5年省','5yr saves')}<b>&euro;{rec_prem*5:,}</b>{t('（含skew和滚仓可能达','(with skew + rolling possibly ')}&euro;{round(rec_prem*5*1.6):,}{t('）',')')}<br>
+  &middot; {t('方案B','Plan B')}: {t('5年省','5yr saves')}<b>&euro;{planb_prem*5:,}</b>{t('（含skew可能达','(with skew possibly ')}&euro;{round(planb_prem*5*1.5):,}{t('）',')')}<br>
+  {t(f'即使不对冲、基金跌回买入价，你的亏损是€{fv-INITIAL_INV:,}浮盈归零——<b>不亏本金</b>。只有在跌破买入价时才真正损失本金。',f'Even without hedging, if the fund drops to entry price, you lose €{fv-INITIAL_INV:,} in unrealized gains — <b>no principal loss</b>. Principal loss only occurs below entry price.')}<br>
+  {t(f'而5年省下的€{rec_prem*5:,}~€{round(rec_prem*5*1.6):,}保费（方案A级别），本身可以吸收约{round(rec_prem*5*1.3/fv*100)}%的基金下跌。',f'The €{rec_prem*5:,}~€{round(rec_prem*5*1.6):,} saved premium (Plan A level) over 5 years can itself absorb ~{round(rec_prem*5*1.3/fv*100)}% of fund decline.')}<br>
+  <b style="color:#c62828">{t('但如果出现2008级别崩盘（-40%以上），不对冲的损失远超省下的保费——这正是对冲存在的意义。','But in a 2008-level crash (-40%+), unhedged losses far exceed saved premiums — this is precisely why the hedge exists.')}</b>
+</div>
+<div class="alert a-warn" style="font-size:13px">
+  <b>{t('Greek风险提醒','Greek Risk Reminder')}</b><br>
+  {t('本报告主要展示到期损益（内在价值），但实际持有过程中Put的市值受Greek因子影响：','This report primarily shows expiry payoff (intrinsic value), but during the holding period Put market value is affected by Greek factors:')}<br>
+  &middot; <b>Theta({t('时间衰减','Time Decay')})</b>{t(f'：9个月的ATM Put，前3个月大约贬值25-35%（theta前期衰减较慢），后3个月加速贬值。持有到最后1个月时，时间价值几乎归零。',f': A 9-month ATM Put loses ~25-35% of value in the first 3 months (theta decays slowly early), then accelerates. By the last month, time value is nearly zero.')}<br>
+  &middot; <b>Vega({t('波动率敏感度','Volatility Sensitivity')})</b>{t('：IV从19%升到30%时，方案A的Put市值可能升值€8,000-12,000——这是一个<b>隐性保护</b>：暴跌初期IV飙升导致Put先于到期赔付而升值，你可以在暴跌发生时卖出Put直接获利，而不必等到期。',': When IV rises from 19% to 30%, Plan A Put market value may increase €8,000-12,000 — this is an <b>implicit protection</b>: IV spikes during early crash stages cause Puts to gain value before expiry payout. You can sell Puts during the crash to capture profits immediately, without waiting for expiry.')}<br>
+  &middot; <b>Gamma</b>{t('：随着Put接近实值，delta加速增大，赔付速度非线性加快——这有利于持有人，但也意味着做市商在恐慌期会大幅扩大spread。',': As Put approaches ITM, delta accelerates, payout speed increases non-linearly — this benefits holders, but also means market makers will widen spreads significantly during panic.')}
 </div>
 </div>
 
@@ -1393,6 +1428,8 @@ Plotly.newPlot('c1',__C1__.data,__C1__.layout,{{responsive:true}});
 Plotly.newPlot('c2',__C2__.data,__C2__.layout,{{responsive:true}});
 Plotly.newPlot('c5',__C5__.data,__C5__.layout,{{responsive:true}});
 var c5bData=__C5B__;
+// Fix premium link path: if not in docs/ dir, prepend docs/
+(function(){{var a=document.getElementById('link-prem');if(a&&location.pathname.indexOf('/docs/')<0&&location.hostname!=='amoukyou.github.io')a.href='docs/'+a.getAttribute('href');}})();
 function switchPlan(p){{
   var a=document.querySelectorAll('.plan-panel-a'),b=document.querySelectorAll('.plan-panel-b');
   var btnA=document.getElementById('btn-a'),btnB=document.getElementById('btn-b');
@@ -1849,6 +1886,337 @@ buildChain({ibex_now}, {rec['K']}, {K_90});
     return html
 
 
+def append_premium_snapshot(live, res, iv_points):
+    """每次运行追加一条快照到 premium_history.json"""
+    import json as _json
+    from datetime import datetime
+    docs_dir = os.path.join(DATA_DIR, 'docs')
+    hist_path = os.path.join(docs_dir, 'premium_history.json')
+    history = []
+    if os.path.exists(hist_path):
+        try:
+            with open(hist_path) as f:
+                history = _json.load(f)
+        except Exception:
+            history = []
+    ibex = live['ibex']
+    T_put = live.get('best_put_T', 1.0)
+    K_atm = round(ibex / 50) * 50
+    K_otm = round(ibex * 0.90 / 50) * 50
+    p_atm = bs_put(ibex, K_atm, T_put)
+    p_otm = bs_put(ibex, K_otm, T_put)
+    annual_factor = 1.0 / T_put if T_put > 0 else 1.0
+    bs_a_raw = round(p_atm * 8 + p_otm * 20)
+    bs_b_raw = round(p_otm * 24)
+    bs_a_annual = round(bs_a_raw * annual_factor)
+    bs_b_annual = round(bs_b_raw * annual_factor)
+    # MEFF Ask prices
+    meff_atm_ask, meff_otm_ask = None, None
+    chain_data = live.get('meff_chain', {})
+    best_code = live.get('best_put_expiry_code')
+    if best_code and chain_data.get('chains', {}).get(best_code):
+        for p in chain_data['chains'][best_code]:
+            if abs(p['strike'] - K_atm) < 51 and p.get('ask'):
+                meff_atm_ask = p['ask']
+            if abs(p['strike'] - K_otm) < 51 and p.get('ask'):
+                meff_otm_ask = p['ask']
+    meff_a = round(meff_atm_ask * 8 + meff_otm_ask * 20) if meff_atm_ask and meff_otm_ask else None
+    meff_b = round(meff_otm_ask * 24) if meff_otm_ask else None
+    # IV at ATM and OTM
+    iv_atm = round(interp_iv(K_atm, iv_points) * 100, 1)
+    iv_otm = round(interp_iv(K_otm, iv_points) * 100, 1)
+    snap = dict(
+        ts=datetime.now().strftime('%Y-%m-%d %H:%M'),
+        ibex=round(ibex), psi=round(live['psi']),
+        fund_nav=round(live['fund_nav'], 2), fund_value=live['fund_value'],
+        K_atm=K_atm, K_otm=K_otm, T_put=round(T_put, 3),
+        iv_atm=iv_atm, iv_otm=iv_otm,
+        bs_a_raw=bs_a_raw, bs_b_raw=bs_b_raw,
+        bs_a_annual=bs_a_annual, bs_b_annual=bs_b_annual,
+        meff_a=meff_a, meff_b=meff_b,
+        meff_atm_ask=meff_atm_ask, meff_otm_ask=meff_otm_ask,
+        p_atm=round(p_atm, 1), p_otm=round(p_otm, 1),
+        expiry=live.get('best_put_expiry_label', '?'),
+    )
+    # 去重：同一天同一小时不重复
+    ts_hour = snap['ts'][:13]  # 'YYYY-MM-DD HH'
+    history = [h for h in history if h.get('ts', '')[:13] != ts_hour]
+    history.append(snap)
+    history.sort(key=lambda x: x['ts'])
+    with open(hist_path, 'w') as f:
+        _json.dump(history, f, ensure_ascii=False)
+    print(f'  快照已记录: IBEX={ibex:.0f} IV_ATM={iv_atm}% BS_A=€{bs_a_raw} MEFF_A=€{meff_a or "N/A"}')
+
+
+def generate_premium_page():
+    """生成历史保费跟踪独立HTML页面"""
+    import json as _json
+    docs_dir = os.path.join(DATA_DIR, 'docs')
+    out_path = os.path.join(docs_dir, 'premium.html')
+    # 读取历史数据，内嵌到HTML中（避免file://协议fetch失败）
+    hist_path = os.path.join(docs_dir, 'premium_history.json')
+    hist_data = '[]'
+    if os.path.exists(hist_path):
+        try:
+            with open(hist_path) as f:
+                hist_data = f.read().strip() or '[]'
+        except Exception:
+            hist_data = '[]'
+    html = r"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>历史保费跟踪 | Premium Tracker</title>
+<script src="https://cdn.plot.ly/plotly-3.4.0.min.js" crossorigin="anonymous"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f6fb;color:#1a1a2e;font-size:15px;line-height:1.65}
+.page{max-width:1200px;margin:0 auto;padding:24px 20px 60px}
+h1{font-size:24px;font-weight:800;color:#1a237e;margin-bottom:4px}
+.meta{color:#777;font-size:13px;margin-bottom:20px}
+.nav{display:flex;gap:12px;margin-bottom:20px;align-items:center}
+.nav a{color:#1a237e;font-weight:700;text-decoration:none;font-size:13px;padding:6px 14px;border:2px solid #1a237e;border-radius:8px}
+.nav a:hover{background:#eef2ff}
+.lang-btn{padding:6px 14px;border:2px solid #1a237e;border-radius:8px;background:white;cursor:pointer;font-size:13px;font-weight:700;color:#1a237e;margin-left:auto}
+.chart-box{background:white;border-radius:12px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,0.07);margin-bottom:16px}
+.detail-panel{display:none;background:white;border-radius:12px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.12);margin-bottom:16px;border:2px solid #1a237e}
+.detail-panel.show{display:block}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.kv{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #eee;font-size:13px}
+.kv .k{color:#888}.kv .v{font-weight:700}
+.signal{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:700}
+.sig-low{background:#e8f5e9;color:#2e7d32}.sig-mid{background:#fff8e1;color:#f57f17}.sig-hi{background:#fdecea;color:#c62828}
+body.lang-en .zh{display:none}
+body.lang-zh .en{display:none}
+@media(max-width:700px){.detail-grid{grid-template-columns:1fr}}
+</style></head><body class="lang-zh">
+<div class="page">
+<div class="nav">
+  <a href="index.html">&larr; <span class="zh">返回主报告</span><span class="en">Back to Report</span></a>
+  <span style="color:#888;font-size:12px"><span class="zh">每个工作日自动采样</span><span class="en">Auto-sampled every trading day</span></span>
+  <button class="lang-btn" id="lang-btn" onclick="toggleLang()">EN</button>
+</div>
+<h1><span class="zh">历史保费跟踪</span><span class="en">Premium Tracker</span></h1>
+<p class="meta"><span class="zh">追踪方案A/B保费成本随时间变化，帮你选择IV低位入场</span><span class="en">Track Plan A/B premium costs over time — enter when IV is low</span></p>
+
+<div class="chart-box"><div id="chart-prem" style="height:400px"></div></div>
+<div class="chart-box"><div id="chart-iv" style="height:300px"></div></div>
+
+<div class="detail-panel" id="detail">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="font-size:16px;color:#1a237e" id="detail-title"><span class="zh">快照详情</span><span class="en">Snapshot Detail</span></h2>
+    <button onclick="closeDetail()" style="padding:4px 12px;border:1px solid #ccc;border-radius:6px;cursor:pointer;font-size:13px"><span class="zh">关闭</span><span class="en">Close</span></button>
+  </div>
+  <div class="detail-grid">
+    <div>
+      <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">市场数据</span><span class="en">Market Data</span></h3>
+      <div id="detail-market"></div>
+      <h3 style="font-size:14px;color:#1a237e;margin:12px 0 8px"><span class="zh">方案A</span><span class="en">Plan A</span>: ATM×8 + OTM×20</h3>
+      <div id="detail-plan-a"></div>
+      <h3 style="font-size:14px;color:#1a237e;margin:12px 0 8px"><span class="zh">方案B</span><span class="en">Plan B</span>: OTM×24</h3>
+      <div id="detail-plan-b"></div>
+    </div>
+    <div>
+      <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">损益曲线 (方案A)</span><span class="en">Payoff Curve (Plan A)</span></h3>
+      <div id="detail-payoff" style="height:280px"></div>
+    </div>
+  </div>
+  <div style="margin-top:12px">
+    <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">行权价参考</span><span class="en">Strike Reference</span></h3>
+    <div id="detail-strikes" style="font-size:13px"></div>
+  </div>
+</div>
+
+<div class="chart-box" style="padding:12px 16px">
+  <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">IV水平参考</span><span class="en">IV Level Guide</span></h3>
+  <p style="font-size:12px;color:#888;line-height:1.8">
+    ATM IV < 16%: <span class="signal sig-low"><span class="zh">低位，适合入场</span><span class="en">Low — good entry</span></span>&nbsp;
+    16%-20%: <span class="signal sig-mid"><span class="zh">正常水平</span><span class="en">Normal</span></span>&nbsp;
+    > 20%: <span class="signal sig-hi"><span class="zh">偏高，保费贵</span><span class="en">High — expensive</span></span><br>
+    <span class="zh">OTM IV因skew通常比ATM高3-5个百分点。恐慌期IV可能达25-30%+，保费翻倍。</span>
+    <span class="en">OTM IV is typically 3-5pp higher than ATM due to skew. During panic, IV can reach 25-30%+, doubling premiums.</span><br>
+    <b><span class="zh">策略</span><span class="en">Strategy</span></b><span class="zh">：等IV回落到16%以下时买入Put，可以用更低的成本获得同样的保护。</span><span class="en">: Wait for IV to drop below 16% before buying Puts — same protection at lower cost.</span>
+  </p>
+</div>
+
+</div>
+<script>
+var DATA = __PREMIUM_DATA__;
+var PARAMS = {
+  betaFP: 0.6271, betaIP: 0.6897, initInv: 507000, r: 0.026
+};
+var LANG = 'zh';
+function toggleLang(){
+  LANG = LANG==='zh'?'en':'zh';
+  document.body.className = 'lang-'+LANG;
+  document.getElementById('lang-btn').textContent = LANG==='zh'?'EN':'中文';
+  if(DATA.length) renderCharts();
+}
+function T(zh,en){return LANG==='zh'?zh:en;}
+
+function normCdf(x) {
+  var a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  var sign=x<0?-1:1; x=Math.abs(x)/Math.sqrt(2);
+  var t=1/(1+p*x);
+  return 0.5*(1+sign*(1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x)));
+}
+function bsPut(S,K,T,r,sigma){
+  if(T<=0)return Math.max(K-S,0);
+  var d1=(Math.log(S/K)+(r+0.5*sigma*sigma)*T)/(sigma*Math.sqrt(T));
+  var d2=d1-sigma*Math.sqrt(T);
+  return K*Math.exp(-r*T)*normCdf(-d2)-S*normCdf(-d1);
+}
+
+// 数据已内嵌，直接渲染
+if(DATA.length) renderCharts();
+else document.querySelector('.page').innerHTML += '<div style="color:#888;padding:20px;text-align:center">'+T('暂无历史数据，等待首次采样...','No historical data yet, waiting for first sample...')+'</div>';
+
+function renderCharts(){
+  if(!DATA.length) return;
+  var ts=[], ibex=[], bsA=[], bsB=[], meffA=[], meffB=[], ivAtm=[], ivOtm=[];
+  DATA.forEach(function(d){
+    ts.push(d.ts);
+    ibex.push(d.ibex);
+    bsA.push(d.bs_a_raw);
+    bsB.push(d.bs_b_raw);
+    meffA.push(d.meff_a);
+    meffB.push(d.meff_b);
+    ivAtm.push(d.iv_atm);
+    ivOtm.push(d.iv_otm);
+  });
+  // Premium chart
+  var traces = [
+    {x:ts, y:meffA, name:T('方案A MEFF Ask','Plan A MEFF Ask'), line:{color:'#2e7d32',width:2.5}, connectgaps:false,
+     hovertemplate:'%{x}<br>'+T('方案A','Plan A')+' MEFF: €%{y:,}<extra></extra>'},
+    {x:ts, y:meffB, name:T('方案B MEFF Ask','Plan B MEFF Ask'), line:{color:'#e65100',width:2.5}, connectgaps:false,
+     hovertemplate:'%{x}<br>'+T('方案B','Plan B')+' MEFF: €%{y:,}<extra></extra>'},
+    {x:ts, y:bsA, name:T('方案A BS理论','Plan A BS Theory'), line:{color:'#2e7d32',width:1.5,dash:'dot'}, opacity:0.5,
+     hovertemplate:'%{x}<br>'+T('方案A','Plan A')+' BS: €%{y:,}<extra></extra>'},
+    {x:ts, y:bsB, name:T('方案B BS理论','Plan B BS Theory'), line:{color:'#e65100',width:1.5,dash:'dot'}, opacity:0.5,
+     hovertemplate:'%{x}<br>'+T('方案B','Plan B')+' BS: €%{y:,}<extra></extra>'},
+    {x:ts, y:ibex, name:'IBEX35', yaxis:'y2', line:{color:'#1a237e',width:1.5,dash:'dash'}, opacity:0.6,
+     hovertemplate:'%{x}<br>IBEX: %{y:,.0f}<extra></extra>'}
+  ];
+  Plotly.newPlot('chart-prem', traces, {
+    template:'plotly_white', height:400,
+    title:{text:T('本轮保费（单轮成本）','Round Premium (Single-Round Cost)'), font:{size:15,color:'#1a237e'}},
+    yaxis:{title:T('保费 (EUR)','Premium (EUR)'), tickformat:',', side:'left'},
+    yaxis2:{title:'IBEX35', overlaying:'y', side:'right', tickformat:',', showgrid:false},
+    legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
+    margin:{t:40,b:40,l:70,r:70}, hovermode:'x unified',
+    xaxis:{type:'category', tickangle:-45, nticks:20}
+  }, {responsive:true});
+  // Click handler
+  document.getElementById('chart-prem').on('plotly_click', function(ev){
+    var idx = ev.points[0].pointIndex;
+    showDetail(idx);
+  });
+
+  // IV chart
+  Plotly.newPlot('chart-iv', [
+    {x:ts, y:ivAtm, name:'ATM IV%', line:{color:'#1565c0',width:2.5},
+     hovertemplate:'%{x}<br>ATM IV: %{y:.1f}%<extra></extra>'},
+    {x:ts, y:ivOtm, name:'90%OTM IV%', line:{color:'#c62828',width:2.5},
+     hovertemplate:'%{x}<br>OTM IV: %{y:.1f}%<extra></extra>'},
+    {x:ts, y:ibex.map(function(v){return v}), name:'IBEX35', yaxis:'y2',
+     line:{color:'#1a237e',width:1.5,dash:'dash'}, opacity:0.5,
+     hovertemplate:'%{x}<br>IBEX: %{y:,.0f}<extra></extra>'}
+  ], {
+    template:'plotly_white', height:300,
+    title:{text:T('隐含波动率 (IV) 走势','Implied Volatility (IV) Trend'), font:{size:15,color:'#1a237e'}},
+    yaxis:{title:'IV (%)', range:[10,35]},
+    yaxis2:{title:'IBEX35', overlaying:'y', side:'right', tickformat:',', showgrid:false},
+    legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
+    margin:{t:40,b:40,l:60,r:70}, hovermode:'x unified',
+    xaxis:{type:'category', tickangle:-45, nticks:20},
+    shapes:[{type:'line',y0:16,y1:16,x0:0,x1:1,xref:'paper',line:{color:'#2e7d32',width:1,dash:'dot'}},
+            {type:'line',y0:20,y1:20,x0:0,x1:1,xref:'paper',line:{color:'#c62828',width:1,dash:'dot'}}]
+  }, {responsive:true});
+}
+
+function showDetail(idx){
+  var d = DATA[idx]; if(!d) return;
+  var panel = document.getElementById('detail');
+  panel.classList.add('show');
+  document.getElementById('detail-title').innerHTML = d.ts + ' <span class="zh">快照详情</span><span class="en">Snapshot Detail</span>';
+  // Market data
+  var ivSig = d.iv_atm < 16 ? 'sig-low' : (d.iv_atm > 20 ? 'sig-hi' : 'sig-mid');
+  var ivLabel = d.iv_atm < 16 ? T('低位','Low') : (d.iv_atm > 20 ? T('偏高','High') : T('正常','Normal'));
+  document.getElementById('detail-market').innerHTML =
+    kv('IBEX35', d.ibex.toLocaleString() + ' pts') +
+    kv('PSI20', d.psi.toLocaleString() + ' pts') +
+    kv(T('基金NAV','Fund NAV'), '€' + d.fund_nav) +
+    kv(T('基金市值','Fund Value'), '€' + d.fund_value.toLocaleString()) +
+    kv('ATM IV', d.iv_atm + '% <span class="signal '+ivSig+'">'+ivLabel+'</span>') +
+    kv('OTM IV', d.iv_otm + '%') +
+    kv(T('到期月','Expiry'), d.expiry) +
+    kv(T('剩余期限','Time to Expiry'), d.T_put + T('年',' yr'));
+  // Plan A
+  document.getElementById('detail-plan-a').innerHTML =
+    kv(T('ATM行权价 ×8','ATM Strike ×8'), d.K_atm.toLocaleString() + ' (€' + d.p_atm + T('/张','/ct') + ')') +
+    kv(T('OTM行权价 ×20','OTM Strike ×20'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
+    kv(T('BS理论价','BS Theory'), '€' + d.bs_a_raw.toLocaleString()) +
+    kv('MEFF Ask', d.meff_a ? '€' + d.meff_a.toLocaleString() : 'N/A');
+  // Plan B
+  document.getElementById('detail-plan-b').innerHTML =
+    kv(T('OTM行权价 ×24','OTM Strike ×24'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
+    kv(T('BS理论价','BS Theory'), '€' + d.bs_b_raw.toLocaleString()) +
+    kv('MEFF Ask', d.meff_b ? '€' + d.meff_b.toLocaleString() : 'N/A');
+  // Payoff chart
+  var xs=[],yFund=[],yHedged=[],yPut=[];
+  var fv=d.fund_value, psi=d.psi, ibex=d.ibex, K=d.K_atm, K90=d.K_otm;
+  var sigAtm=d.iv_atm/100, sigOtm=d.iv_otm/100, Texp=d.T_put;
+  var prem = d.meff_a || d.bs_a_raw;
+  for(var p=5000;p<=11000;p+=100){
+    var pDrop=(p-psi)/psi;
+    var fundEst=fv*(1+PARAMS.betaFP*pDrop);
+    var ibexEst=ibex*(1+PARAMS.betaIP*pDrop);
+    var putPay=Math.max(K-ibexEst,0)*8+Math.max(K90-ibexEst,0)*20;
+    xs.push(p); yFund.push(Math.round(fundEst));
+    yHedged.push(Math.round(fundEst+putPay-prem));
+    yPut.push(Math.round(putPay));
+  }
+  Plotly.newPlot('detail-payoff',[
+    {x:xs,y:yFund,name:T('不对冲','Unhedged'),line:{color:'#c62828',width:2,dash:'dot'}},
+    {x:xs,y:yHedged,name:T('方案A对冲后','Plan A Hedged'),line:{color:'#2e7d32',width:3}},
+    {x:xs,y:yPut,name:T('Put赔付','Put Payout'),line:{color:'#1565c0',width:1.5,dash:'dash'},yaxis:'y2'}
+  ],{
+    template:'plotly_white',height:280,
+    xaxis:{title:'PSI20'},
+    yaxis:{title:T('基金市值(EUR)','Fund Value(EUR)'),tickformat:','},
+    yaxis2:{title:T('赔付','Payout'),overlaying:'y',side:'right',tickformat:',',showgrid:false},
+    legend:{x:0.01,y:0.01,bgcolor:'rgba(255,255,255,0.9)',font:{size:10}},
+    margin:{t:10,b:40,l:65,r:65},hovermode:'x unified'
+  },{responsive:true});
+  // Strikes reference
+  var strikesHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px">';
+  var pcts = [0.85,0.88,0.90,0.93,0.95,1.00,1.03];
+  pcts.forEach(function(pct){
+    var s = Math.round(ibex*pct/50)*50;
+    var price = bsPut(ibex,s,Texp,PARAMS.r,pct<0.95?sigOtm:sigAtm);
+    var tag = '';
+    if(s===K) tag=' <b style="color:#2e7d32">ATM</b>';
+    if(s===K90) tag=' <b style="color:#e65100">OTM</b>';
+    strikesHtml += '<div style="background:#f5f5f5;padding:6px 8px;border-radius:6px;font-size:12px">'+
+      '<b>'+s.toLocaleString()+'</b> ('+(((pct-1)*100).toFixed(0))+'%)'+tag+
+      '<br>BS €'+Math.round(price)+'</div>';
+  });
+  strikesHtml += '</div>';
+  document.getElementById('detail-strikes').innerHTML = strikesHtml;
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function closeDetail(){
+  document.getElementById('detail').classList.remove('show');
+}
+
+function kv(k,v){
+  return '<div class="kv"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';
+}
+</script></body></html>"""
+    html = html.replace('__PREMIUM_DATA__', hist_data)
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write(html)
+    print(f'→ {out_path}')
+
+
 def main():
     from datetime import datetime
     print('获取实时价格...')
@@ -1941,6 +2309,11 @@ def main():
     out = os.path.join(DATA_DIR, 'hedge_final.html')
     with open(out, 'w', encoding='utf-8') as f: f.write(html)
     print(f'→ {out}')
+    # ═══ 历史保费跟踪：记录快照 + 生成页面 ═══
+    print('更新历史保费跟踪...')
+    append_premium_snapshot(live, res, _meff_iv_points)
+    generate_premium_page()
+
     # 输出 prices.json 供页面刷新按钮使用（同域，无CORS问题）
     import json as _json
     prices_json = _json.dumps(dict(

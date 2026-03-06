@@ -41,7 +41,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `hedge_final.py` | **主文件（v18）** — 生成完整报告，含实时数据抓取和交互图表 |
+| `hedge_final.py` | **主文件（v19）** — 生成完整报告，含实时数据抓取和交互图表 |
 | `hedge_final.html` | 生成的报告网页 |
 | `docs/index.html` | GitHub Pages 副本（自动同步） |
 | `.github/workflows/update-report.yml` | 每日自动更新（工作日 UTC 18:30） |

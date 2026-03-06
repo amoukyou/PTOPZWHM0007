@@ -1,0 +1,249 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>历史保费跟踪 | Premium Tracker</title>
+<script src="https://cdn.plot.ly/plotly-3.4.0.min.js" crossorigin="anonymous"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f6fb;color:#1a1a2e;font-size:15px;line-height:1.65}
+.page{max-width:1200px;margin:0 auto;padding:24px 20px 60px}
+h1{font-size:24px;font-weight:800;color:#1a237e;margin-bottom:4px}
+.meta{color:#777;font-size:13px;margin-bottom:20px}
+.nav{display:flex;gap:12px;margin-bottom:20px;align-items:center}
+.nav a{color:#1a237e;font-weight:700;text-decoration:none;font-size:13px;padding:6px 14px;border:2px solid #1a237e;border-radius:8px}
+.nav a:hover{background:#eef2ff}
+.lang-btn{padding:6px 14px;border:2px solid #1a237e;border-radius:8px;background:white;cursor:pointer;font-size:13px;font-weight:700;color:#1a237e;margin-left:auto}
+.chart-box{background:white;border-radius:12px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,0.07);margin-bottom:16px}
+.detail-panel{display:none;background:white;border-radius:12px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.12);margin-bottom:16px;border:2px solid #1a237e}
+.detail-panel.show{display:block}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.kv{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #eee;font-size:13px}
+.kv .k{color:#888}.kv .v{font-weight:700}
+.signal{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:700}
+.sig-low{background:#e8f5e9;color:#2e7d32}.sig-mid{background:#fff8e1;color:#f57f17}.sig-hi{background:#fdecea;color:#c62828}
+body.lang-en .zh{display:none}
+body.lang-zh .en{display:none}
+@media(max-width:700px){.detail-grid{grid-template-columns:1fr}}
+</style></head><body class="lang-zh">
+<div class="page">
+<div class="nav">
+  <a href="index.html">&larr; <span class="zh">返回主报告</span><span class="en">Back to Report</span></a>
+  <span style="color:#888;font-size:12px"><span class="zh">每个工作日自动采样</span><span class="en">Auto-sampled every trading day</span></span>
+  <button class="lang-btn" id="lang-btn" onclick="toggleLang()">EN</button>
+</div>
+<h1><span class="zh">历史保费跟踪</span><span class="en">Premium Tracker</span></h1>
+<p class="meta"><span class="zh">追踪方案A/B保费成本随时间变化，帮你选择IV低位入场</span><span class="en">Track Plan A/B premium costs over time — enter when IV is low</span></p>
+
+<div class="chart-box"><div id="chart-prem" style="height:400px"></div></div>
+<div class="chart-box"><div id="chart-iv" style="height:300px"></div></div>
+
+<div class="detail-panel" id="detail">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h2 style="font-size:16px;color:#1a237e" id="detail-title"><span class="zh">快照详情</span><span class="en">Snapshot Detail</span></h2>
+    <button onclick="closeDetail()" style="padding:4px 12px;border:1px solid #ccc;border-radius:6px;cursor:pointer;font-size:13px"><span class="zh">关闭</span><span class="en">Close</span></button>
+  </div>
+  <div class="detail-grid">
+    <div>
+      <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">市场数据</span><span class="en">Market Data</span></h3>
+      <div id="detail-market"></div>
+      <h3 style="font-size:14px;color:#1a237e;margin:12px 0 8px"><span class="zh">方案A</span><span class="en">Plan A</span>: ATM×8 + OTM×20</h3>
+      <div id="detail-plan-a"></div>
+      <h3 style="font-size:14px;color:#1a237e;margin:12px 0 8px"><span class="zh">方案B</span><span class="en">Plan B</span>: OTM×24</h3>
+      <div id="detail-plan-b"></div>
+    </div>
+    <div>
+      <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">损益曲线 (方案A)</span><span class="en">Payoff Curve (Plan A)</span></h3>
+      <div id="detail-payoff" style="height:280px"></div>
+    </div>
+  </div>
+  <div style="margin-top:12px">
+    <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">行权价参考</span><span class="en">Strike Reference</span></h3>
+    <div id="detail-strikes" style="font-size:13px"></div>
+  </div>
+</div>
+
+<div class="chart-box" style="padding:12px 16px">
+  <h3 style="font-size:14px;color:#1a237e;margin-bottom:8px"><span class="zh">IV水平参考</span><span class="en">IV Level Guide</span></h3>
+  <p style="font-size:12px;color:#888;line-height:1.8">
+    ATM IV < 16%: <span class="signal sig-low"><span class="zh">低位，适合入场</span><span class="en">Low — good entry</span></span>&nbsp;
+    16%-20%: <span class="signal sig-mid"><span class="zh">正常水平</span><span class="en">Normal</span></span>&nbsp;
+    > 20%: <span class="signal sig-hi"><span class="zh">偏高，保费贵</span><span class="en">High — expensive</span></span><br>
+    <span class="zh">OTM IV因skew通常比ATM高3-5个百分点。恐慌期IV可能达25-30%+，保费翻倍。</span>
+    <span class="en">OTM IV is typically 3-5pp higher than ATM due to skew. During panic, IV can reach 25-30%+, doubling premiums.</span><br>
+    <b><span class="zh">策略</span><span class="en">Strategy</span></b><span class="zh">：等IV回落到16%以下时买入Put，可以用更低的成本获得同样的保护。</span><span class="en">: Wait for IV to drop below 16% before buying Puts — same protection at lower cost.</span>
+  </p>
+</div>
+
+</div>
+<script>
+var DATA = [{"ts": "2026-03-06 22:56", "ibex": 16864, "psi": 8842, "fund_nav": 17.1, "fund_value": 649253, "K_atm": 16850, "K_otm": 15200, "T_put": 0.784, "iv_atm": 18.9, "iv_otm": 22.3, "bs_a_raw": 17635, "bs_b_raw": 12095, "bs_a_annual": 22494, "bs_b_annual": 15427, "meff_a": 23192, "meff_b": 15984, "meff_atm_ask": 1234.0, "meff_otm_ask": 666.0, "p_atm": 944.5, "p_otm": 503.9, "expiry": "18/12/2026"}, {"ts": "2026-03-06 23:12", "ibex": 16927, "psi": 8867, "fund_nav": 17.1, "fund_value": 649253, "K_atm": 16950, "K_otm": 15250, "T_put": 0.784, "iv_atm": 18.7, "iv_otm": 22.2, "bs_a_raw": 17607, "bs_b_raw": 11976, "bs_a_annual": 22458, "bs_b_annual": 15276, "meff_a": 23304, "meff_b": 16032, "meff_atm_ask": 1243.0, "meff_otm_ask": 668.0, "p_atm": 953.3, "p_otm": 499.0, "expiry": "18/12/2026"}];
+var PARAMS = {
+  betaFP: 0.6271, betaIP: 0.6897, initInv: 507000, r: 0.026
+};
+var LANG = 'zh';
+function toggleLang(){
+  LANG = LANG==='zh'?'en':'zh';
+  document.body.className = 'lang-'+LANG;
+  document.getElementById('lang-btn').textContent = LANG==='zh'?'EN':'中文';
+  if(DATA.length) renderCharts();
+}
+function T(zh,en){return LANG==='zh'?zh:en;}
+
+function normCdf(x) {
+  var a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  var sign=x<0?-1:1; x=Math.abs(x)/Math.sqrt(2);
+  var t=1/(1+p*x);
+  return 0.5*(1+sign*(1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x)));
+}
+function bsPut(S,K,T,r,sigma){
+  if(T<=0)return Math.max(K-S,0);
+  var d1=(Math.log(S/K)+(r+0.5*sigma*sigma)*T)/(sigma*Math.sqrt(T));
+  var d2=d1-sigma*Math.sqrt(T);
+  return K*Math.exp(-r*T)*normCdf(-d2)-S*normCdf(-d1);
+}
+
+// 数据已内嵌，直接渲染
+if(DATA.length) renderCharts();
+else document.querySelector('.page').innerHTML += '<div style="color:#888;padding:20px;text-align:center">'+T('暂无历史数据，等待首次采样...','No historical data yet, waiting for first sample...')+'</div>';
+
+function renderCharts(){
+  if(!DATA.length) return;
+  var ts=[], ibex=[], bsA=[], bsB=[], meffA=[], meffB=[], ivAtm=[], ivOtm=[];
+  DATA.forEach(function(d){
+    ts.push(d.ts);
+    ibex.push(d.ibex);
+    bsA.push(d.bs_a_raw);
+    bsB.push(d.bs_b_raw);
+    meffA.push(d.meff_a);
+    meffB.push(d.meff_b);
+    ivAtm.push(d.iv_atm);
+    ivOtm.push(d.iv_otm);
+  });
+  // Premium chart
+  var traces = [
+    {x:ts, y:meffA, name:T('方案A MEFF Ask','Plan A MEFF Ask'), line:{color:'#2e7d32',width:2.5}, connectgaps:false,
+     hovertemplate:'%{x}<br>'+T('方案A','Plan A')+' MEFF: €%{y:,}<extra></extra>'},
+    {x:ts, y:meffB, name:T('方案B MEFF Ask','Plan B MEFF Ask'), line:{color:'#e65100',width:2.5}, connectgaps:false,
+     hovertemplate:'%{x}<br>'+T('方案B','Plan B')+' MEFF: €%{y:,}<extra></extra>'},
+    {x:ts, y:bsA, name:T('方案A BS理论','Plan A BS Theory'), line:{color:'#2e7d32',width:1.5,dash:'dot'}, opacity:0.5,
+     hovertemplate:'%{x}<br>'+T('方案A','Plan A')+' BS: €%{y:,}<extra></extra>'},
+    {x:ts, y:bsB, name:T('方案B BS理论','Plan B BS Theory'), line:{color:'#e65100',width:1.5,dash:'dot'}, opacity:0.5,
+     hovertemplate:'%{x}<br>'+T('方案B','Plan B')+' BS: €%{y:,}<extra></extra>'},
+    {x:ts, y:ibex, name:'IBEX35', yaxis:'y2', line:{color:'#1a237e',width:1.5,dash:'dash'}, opacity:0.6,
+     hovertemplate:'%{x}<br>IBEX: %{y:,.0f}<extra></extra>'}
+  ];
+  Plotly.newPlot('chart-prem', traces, {
+    template:'plotly_white', height:400,
+    title:{text:T('本轮保费（单轮成本）','Round Premium (Single-Round Cost)'), font:{size:15,color:'#1a237e'}},
+    yaxis:{title:T('保费 (EUR)','Premium (EUR)'), tickformat:',', side:'left'},
+    yaxis2:{title:'IBEX35', overlaying:'y', side:'right', tickformat:',', showgrid:false},
+    legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
+    margin:{t:40,b:40,l:70,r:70}, hovermode:'x unified',
+    xaxis:{type:'category', tickangle:-45, nticks:20}
+  }, {responsive:true});
+  // Click handler
+  document.getElementById('chart-prem').on('plotly_click', function(ev){
+    var idx = ev.points[0].pointIndex;
+    showDetail(idx);
+  });
+
+  // IV chart
+  Plotly.newPlot('chart-iv', [
+    {x:ts, y:ivAtm, name:'ATM IV%', line:{color:'#1565c0',width:2.5},
+     hovertemplate:'%{x}<br>ATM IV: %{y:.1f}%<extra></extra>'},
+    {x:ts, y:ivOtm, name:'90%OTM IV%', line:{color:'#c62828',width:2.5},
+     hovertemplate:'%{x}<br>OTM IV: %{y:.1f}%<extra></extra>'},
+    {x:ts, y:ibex.map(function(v){return v}), name:'IBEX35', yaxis:'y2',
+     line:{color:'#1a237e',width:1.5,dash:'dash'}, opacity:0.5,
+     hovertemplate:'%{x}<br>IBEX: %{y:,.0f}<extra></extra>'}
+  ], {
+    template:'plotly_white', height:300,
+    title:{text:T('隐含波动率 (IV) 走势','Implied Volatility (IV) Trend'), font:{size:15,color:'#1a237e'}},
+    yaxis:{title:'IV (%)', range:[10,35]},
+    yaxis2:{title:'IBEX35', overlaying:'y', side:'right', tickformat:',', showgrid:false},
+    legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
+    margin:{t:40,b:40,l:60,r:70}, hovermode:'x unified',
+    xaxis:{type:'category', tickangle:-45, nticks:20},
+    shapes:[{type:'line',y0:16,y1:16,x0:0,x1:1,xref:'paper',line:{color:'#2e7d32',width:1,dash:'dot'}},
+            {type:'line',y0:20,y1:20,x0:0,x1:1,xref:'paper',line:{color:'#c62828',width:1,dash:'dot'}}]
+  }, {responsive:true});
+}
+
+function showDetail(idx){
+  var d = DATA[idx]; if(!d) return;
+  var panel = document.getElementById('detail');
+  panel.classList.add('show');
+  document.getElementById('detail-title').innerHTML = d.ts + ' <span class="zh">快照详情</span><span class="en">Snapshot Detail</span>';
+  // Market data
+  var ivSig = d.iv_atm < 16 ? 'sig-low' : (d.iv_atm > 20 ? 'sig-hi' : 'sig-mid');
+  var ivLabel = d.iv_atm < 16 ? T('低位','Low') : (d.iv_atm > 20 ? T('偏高','High') : T('正常','Normal'));
+  document.getElementById('detail-market').innerHTML =
+    kv('IBEX35', d.ibex.toLocaleString() + ' pts') +
+    kv('PSI20', d.psi.toLocaleString() + ' pts') +
+    kv(T('基金NAV','Fund NAV'), '€' + d.fund_nav) +
+    kv(T('基金市值','Fund Value'), '€' + d.fund_value.toLocaleString()) +
+    kv('ATM IV', d.iv_atm + '% <span class="signal '+ivSig+'">'+ivLabel+'</span>') +
+    kv('OTM IV', d.iv_otm + '%') +
+    kv(T('到期月','Expiry'), d.expiry) +
+    kv(T('剩余期限','Time to Expiry'), d.T_put + T('年',' yr'));
+  // Plan A
+  document.getElementById('detail-plan-a').innerHTML =
+    kv(T('ATM行权价 ×8','ATM Strike ×8'), d.K_atm.toLocaleString() + ' (€' + d.p_atm + T('/张','/ct') + ')') +
+    kv(T('OTM行权价 ×20','OTM Strike ×20'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
+    kv(T('BS理论价','BS Theory'), '€' + d.bs_a_raw.toLocaleString()) +
+    kv('MEFF Ask', d.meff_a ? '€' + d.meff_a.toLocaleString() : 'N/A');
+  // Plan B
+  document.getElementById('detail-plan-b').innerHTML =
+    kv(T('OTM行权价 ×24','OTM Strike ×24'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
+    kv(T('BS理论价','BS Theory'), '€' + d.bs_b_raw.toLocaleString()) +
+    kv('MEFF Ask', d.meff_b ? '€' + d.meff_b.toLocaleString() : 'N/A');
+  // Payoff chart
+  var xs=[],yFund=[],yHedged=[],yPut=[];
+  var fv=d.fund_value, psi=d.psi, ibex=d.ibex, K=d.K_atm, K90=d.K_otm;
+  var sigAtm=d.iv_atm/100, sigOtm=d.iv_otm/100, Texp=d.T_put;
+  var prem = d.meff_a || d.bs_a_raw;
+  for(var p=5000;p<=11000;p+=100){
+    var pDrop=(p-psi)/psi;
+    var fundEst=fv*(1+PARAMS.betaFP*pDrop);
+    var ibexEst=ibex*(1+PARAMS.betaIP*pDrop);
+    var putPay=Math.max(K-ibexEst,0)*8+Math.max(K90-ibexEst,0)*20;
+    xs.push(p); yFund.push(Math.round(fundEst));
+    yHedged.push(Math.round(fundEst+putPay-prem));
+    yPut.push(Math.round(putPay));
+  }
+  Plotly.newPlot('detail-payoff',[
+    {x:xs,y:yFund,name:T('不对冲','Unhedged'),line:{color:'#c62828',width:2,dash:'dot'}},
+    {x:xs,y:yHedged,name:T('方案A对冲后','Plan A Hedged'),line:{color:'#2e7d32',width:3}},
+    {x:xs,y:yPut,name:T('Put赔付','Put Payout'),line:{color:'#1565c0',width:1.5,dash:'dash'},yaxis:'y2'}
+  ],{
+    template:'plotly_white',height:280,
+    xaxis:{title:'PSI20'},
+    yaxis:{title:T('基金市值(EUR)','Fund Value(EUR)'),tickformat:','},
+    yaxis2:{title:T('赔付','Payout'),overlaying:'y',side:'right',tickformat:',',showgrid:false},
+    legend:{x:0.01,y:0.01,bgcolor:'rgba(255,255,255,0.9)',font:{size:10}},
+    margin:{t:10,b:40,l:65,r:65},hovermode:'x unified'
+  },{responsive:true});
+  // Strikes reference
+  var strikesHtml = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px">';
+  var pcts = [0.85,0.88,0.90,0.93,0.95,1.00,1.03];
+  pcts.forEach(function(pct){
+    var s = Math.round(ibex*pct/50)*50;
+    var price = bsPut(ibex,s,Texp,PARAMS.r,pct<0.95?sigOtm:sigAtm);
+    var tag = '';
+    if(s===K) tag=' <b style="color:#2e7d32">ATM</b>';
+    if(s===K90) tag=' <b style="color:#e65100">OTM</b>';
+    strikesHtml += '<div style="background:#f5f5f5;padding:6px 8px;border-radius:6px;font-size:12px">'+
+      '<b>'+s.toLocaleString()+'</b> ('+(((pct-1)*100).toFixed(0))+'%)'+tag+
+      '<br>BS €'+Math.round(price)+'</div>';
+  });
+  strikesHtml += '</div>';
+  document.getElementById('detail-strikes').innerHTML = strikesHtml;
+  panel.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function closeDetail(){
+  document.getElementById('detail').classList.remove('show');
+}
+
+function kv(k,v){
+  return '<div class="kv"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';
+}
+</script></body></html>

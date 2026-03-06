@@ -2,9 +2,15 @@ name: Daily Report Update
 
 on:
   schedule:
-    # 每天欧洲收盘后 UTC 18:30 (北京时间凌晨2:30) 运行
-    - cron: '30 18 * * 1-5'
+    # 每个工作日3次采样：欧洲开盘前、午间、收盘后
+    - cron: '0 7 * * 1-5'    # UTC 07:00 (北京15:00, 欧洲开盘前)
+    - cron: '0 12 * * 1-5'   # UTC 12:00 (北京20:00, 欧洲午间)
+    - cron: '30 18 * * 1-5'  # UTC 18:30 (北京02:30, 欧洲收盘后)
   workflow_dispatch:  # 允许手动触发
+
+concurrency:
+  group: report-update
+  cancel-in-progress: false
 
 jobs:
   update:
@@ -25,12 +31,14 @@ jobs:
         run: python3 hedge_final.py
 
       - name: Copy to docs
-        run: cp hedge_final.html docs/index.html
+        run: |
+          cp hedge_final.html docs/index.html
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add hedge_final.html docs/index.html docs/prices.json PTOPZWHM0007_daily_*.csv
-          git diff --cached --quiet || git commit -m "auto: update report $(date -u +%Y-%m-%d)"
+          git add hedge_final.html docs/index.html docs/prices.json docs/premium_history.json docs/premium.html PTOPZWHM0007_daily_*.csv
+          git diff --cached --quiet || git commit -m "auto: update report $(date -u +%Y-%m-%dT%H:%M)"
+          git pull --rebase || true
           git push
