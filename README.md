@@ -55,3 +55,21 @@ python3 hedge_final.py
 ```
 
 自动抓取最新基金NAV（FT Markets）和指数数据（Yahoo Finance），生成 `hedge_final.html` 并打开。
+
+---
+
+## English Summary
+
+Downside hedge analysis for **Optimize Portugal Golden Opportunities Fund** (ISIN: PTOPZWHM0007) — a Portuguese equity fund with €507K initial investment, currently valued at ~€644K.
+
+**The problem**: No options available on the PSI20 index (which the fund tracks closely, R²=79%). We use **IBEX35 Put options** (MEFF Mini contracts, tradable via IBKR) as a cross-hedge, leveraging the Beta relationship between PSI20 and IBEX35.
+
+**Two plans** (toggle in the report header):
+- **Plan A** (Mixed ATM+OTM): ATM×8 + 90%OTM×20 — covers both small and large drops, ~€16,700/yr
+- **Plan B** (Pure OTM): 90%OTM×24 — crash-only protection, ~€10,000/yr
+
+**Key findings**: All 11 historical fund crashes (>3% weekly) saw IBEX decline in sync. Conditional Beta during crashes (~0.53) is ~25% higher than full-sample Beta (0.423). Split-leg rolling strategy saves ~€6,700/yr in rolling costs.
+
+The report page supports **Chinese/English toggle** — click the "EN" button in the top navigation bar.
+
+**[View Live Report](https://amoukyou.github.io/PTOPZWHM0007/)**

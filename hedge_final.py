@@ -204,10 +204,10 @@ def analyze(fund_df, ibex_df, psi_df, live):
     p_85 = bs_put(ibex_now, K_85, 1.0)
     options = []
     configs = [
-        ('纯ATM ×16', '现方案：全部平值', [(16, K, p1)]),
-        (f'ATM ×8 + 90%OTM ×20', '混合：小跌有底+大跌加倍', [(8, K, p1), (20, K_90, p_90)]),
-        (f'ATM ×4 + 90%OTM ×30', '进取：重注大跌保护', [(4, K, p1), (30, K_90, p_90)]),
-        (f'纯90%OTM ×24', '省钱：放弃小跌，只防崩盘', [(24, K_90, p_90)]),
+        (t('纯ATM ×16','Pure ATM ×16'), t('现方案：全部平值','Current: all ATM'), [(16, K, p1)]),
+        (f'ATM ×8 + 90%OTM ×20', t('混合：小跌有底+大跌加倍','Mixed: floor for small drops + doubled crash protection'), [(8, K, p1), (20, K_90, p_90)]),
+        (f'ATM ×4 + 90%OTM ×30', t('进取：重注大跌保护','Aggressive: heavy crash protection'), [(4, K, p1), (30, K_90, p_90)]),
+        (t('纯90%OTM ×24','Pure 90%OTM ×24'), t('省钱：放弃小跌，只防崩盘','Budget: skip small drops, crash-only'), [(24, K_90, p_90)]),
     ]
     for label, desc, legs in configs:
         prem = round(sum(p * n for n, k, p in legs))
@@ -437,6 +437,10 @@ def chart_payoff_planb(rec, live):
         margin=dict(t=10,b=50,l=80,r=20), hovermode='x unified')
     return fig.to_json()
 
+def t(zh, en):
+    """Bilingual text wrapper"""
+    return f'<span class="zh">{zh}</span><span class="en">{en}</span>'
+
 # ─── HTML ─────────────────────────────
 def generate_html(fund_df, psi_df, res, live):
     df, events, strats, rec, options = res['df'], res['events'], res['strats'], res['rec'], res['options']
@@ -464,12 +468,19 @@ def generate_html(fund_df, psi_df, res, live):
     fg = (fund_nav / FUND_ENTRY_PRICE - 1) * 100
     nt = len(events)
     ns = sum(1 for e in events if e['sync'])
+    ibex_avg_chg = f'{np.mean([e["ibex_chg"] for e in events]):.1f}'
+    fund_avg_chg = f'{np.mean([e["fund_chg"] for e in events]):.1f}'
+    ncr = len(crash_ratios)
+    cr_min = f'{min(crash_ratios):.3f}'
+    cr_max = f'{max(crash_ratios):.3f}'
+    cr_pct_above = round((avg_crash_ratio/BETA_FUND_IBEX-1)*100)
+    cov_pct_actual = round(BETA_FUND_IBEX/avg_crash_ratio*100)
 
     # Event table rows + tab buttons + panels
     hist_rows, tab_btns, tab_panels = '', '', ''
     for i, ev in enumerate(events):
         act = ' active' if i==0 else ''
-        hold = '' if ev['in_hold'] else ' <span style="font-size:10px;color:#aaa">(买入前)</span>'
+        hold = '' if ev['in_hold'] else f' <span style="font-size:10px;color:#aaa">{t("(买入前)","(Pre-entry)")}</span>'
         cr = ev.get('crash_ratio')
         cr_str = f'{cr:.3f}' if cr else '-'
         cr_color = '#c62828' if cr and cr > BETA_FUND_IBEX else '#2e7d32'
@@ -485,24 +496,24 @@ def generate_html(fund_df, psi_df, res, live):
         loss = ev.get('fund_loss', abs(fv*ev['fund_chg']/100))
         detail = ''
         if ev['in_hold'] and ev['strat']:
-            detail = '<table style="font-size:13px;margin-top:12px"><tr><th style="text-align:left">策略</th><th>行权价<br><span style="font-weight:400;font-size:10px;color:#888">（模拟中的历史值）</span></th><th>Put赚了</th><th>净亏</th><th>覆盖率</th></tr>'
-            for k, lab in [('12M','12月ATM年滚'),('6M','6月ATM半年滚'),('3M','3月ATM季滚')]:
+            detail = f'<table style="font-size:13px;margin-top:12px"><tr><th style="text-align:left">{t("策略","Strategy")}</th><th>{t("行权价","Strike")}<br><span style="font-weight:400;font-size:10px;color:#888">{t("（模拟中的历史值）","(historical backtest value)")}</span></th><th>{t("Put赚了","Put Gained")}</th><th>{t("净亏","Net Loss")}</th><th>{t("覆盖率","Coverage")}</th></tr>'
+            for k, lab in [('12M',t('12月ATM年滚','12M ATM Annual Roll')),('6M',t('6月ATM半年滚','6M ATM Semi-annual Roll')),('3M',t('3月ATM季滚','3M ATM Quarterly Roll'))]:
                 r = ev['strat'].get(k,{})
                 m, st, c = r.get('mtm',0), r.get('strike',0), r.get('cov',0)
                 cc = '#2e7d32' if c>=20 else ('#e65100' if c>=5 else '#c62828')
-                rm = ' <b style="color:#2e7d32">[推荐]</b>' if k=='12M' else ''
+                rm = f' <b style="color:#2e7d32">[{t("推荐","Rec.")}]</b>' if k=='12M' else ''
                 detail += f'<tr><td style="text-align:left">{lab}{rm}</td><td style="font-size:12px;color:#888">{st:,.0f}</td><td style="color:#2e7d32;font-weight:700">+&euro;{m:,.0f}</td><td style="color:#1565c0;font-weight:700">-&euro;{loss-m:,.0f}</td><td style="font-weight:700;color:{cc}">{c:.0f}%</td></tr>'
             detail += '</table>'
         elif not ev['in_hold']:
-            detail = '<p style="font-size:13px;color:#888;margin-top:8px">此事件发生在你买入基金之前，仅作为IBEX同步性的历史参考。</p>'
+            detail = f'<p style="font-size:13px;color:#888;margin-top:8px">{t("此事件发生在你买入基金之前，仅作为IBEX同步性的历史参考。","This event occurred before your fund purchase, included only as historical reference for IBEX synchronization.")}</p>'
 
         tab_panels += f"""<div class="tab-panel{act}" id="panel_{i}">
           <div class="two-col">
             <div>
               <div class="alert a-good" style="margin-bottom:8px">
                 <b>#{i+1} {ev['start_str']} ~ {ev['end_str']}</b><br>
-                基金1周跌 <b style="color:#c62828">{ev['fund_chg']:.1f}%</b> (约&euro;{loss:,.0f})<br>
-                IBEX&plusmn;2周跌 <b style="color:#2e7d32">{ev['ibex_chg']:+.1f}%</b> ({ev['ibex_peak']:,.0f}&rarr;{ev['ibex_level']:,.0f})
+                {t('基金1周跌','Fund 1-wk drop')} <b style="color:#c62828">{ev['fund_chg']:.1f}%</b> ({t('约','~')}&euro;{loss:,.0f})<br>
+                IBEX&plusmn;{t('2周跌','2-wk drop')} <b style="color:#2e7d32">{ev['ibex_chg']:+.1f}%</b> ({ev['ibex_peak']:,.0f}&rarr;{ev['ibex_level']:,.0f})
               </div>{detail}
             </div>
             <div class="chart-box" style="padding:8px"><div id="zoom_{i}" style="height:260px"></div></div>
@@ -513,11 +524,11 @@ def generate_html(fund_df, psi_df, res, live):
     for i, opt in enumerate(options):
         is_rec = (i == 1)  # ATM×8 + 90%OTM×20 推荐
         st = ' style="background:#f0fff0;font-weight:600"' if is_rec else ''
-        tag = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_rec else ''
+        tag = f' <span style="color:#2e7d32;font-size:11px">[{t("推荐","Rec.")}]</span>' if is_rec else ''
         s5, s10, s20, s30 = opt['scenarios'][5], opt['scenarios'][10], opt['scenarios'][20], opt['scenarios'][30]
         opt_rows += f'''<tr{st}>
           <td style="text-align:left">{opt['label']}{tag}<br><span style="font-size:10px;color:#888">{opt['desc']}</span></td>
-          <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/年</span></td>
+          <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/{t('年','yr')}</span></td>
           <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/fv*100:.1f}%</span></td>
           <td style="color:{'#2e7d32' if s5['payoff']>0 else '#ccc'}">&euro;{s5['payoff']:,}</td>
           <td style="color:#2e7d32;font-weight:600">&euro;{s10['payoff']:,}</td>
@@ -527,14 +538,14 @@ def generate_html(fund_df, psi_df, res, live):
 
     # Cost table (rolling frequency)
     cost_rows = ''
-    for k, lab, freq in [('12M','12个月ATM 年滚',1),('6M','6个月ATM 半年滚',2),('3M','3个月ATM 季滚',4)]:
+    for k, lab, freq in [('12M',t('12个月ATM 年滚','12M ATM Annual Roll'),1),('6M',t('6个月ATM 半年滚','6M ATM Semi-annual Roll'),2),('3M',t('3个月ATM 季滚','3M ATM Quarterly Roll'),4)]:
         s = strats[k]; T = s['months']/12
         pe = bs_put(ibex_now, ibex_now, T)*N_CONTRACTS
         ae = pe * (12/s['months']); fy = ae*5
         is_r = k=='12M'
         st = ' style="background:#f0fff0;font-weight:600"' if is_r else ''
-        tg = ' <span style="color:#2e7d32;font-size:11px">[推荐]</span>' if is_r else ''
-        cost_rows += f'<tr{st}><td style="text-align:left">{lab}{tg}</td><td>{freq}x/年</td><td>&euro;{ae:,.0f} ({ae/fv*100:.2f}%)</td><td>&euro;{fy:,.0f} ({fy/fv*100:.1f}%)</td></tr>'
+        tg = f' <span style="color:#2e7d32;font-size:11px">[{t("推荐","Rec.")}]</span>' if is_r else ''
+        cost_rows += f'<tr{st}><td style="text-align:left">{lab}{tg}</td><td>{freq}x/{t("年","yr")}</td><td>&euro;{ae:,.0f} ({ae/fv*100:.2f}%)</td><td>&euro;{fy:,.0f} ({fy/fv*100:.1f}%)</td></tr>'
 
     # PSI20 scenario rows for section 六 Plan A
     psi_rows = ''
@@ -568,7 +579,7 @@ def generate_html(fund_df, psi_df, res, live):
     planb_chart = chart_payoff_planb(rec, live)
 
     html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
-<title>葡萄牙基金对冲方案</title>
+<title>{t('葡萄牙基金对冲方案','Portuguese Fund Hedge Analysis')}</title>
 <script src="https://cdn.plot.ly/plotly-3.4.0.min.js" crossorigin="anonymous"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
@@ -628,50 +639,53 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 .plan-btn.active-b{{border-color:#e65100;background:#fff3e0;color:#e65100}}
 .plan-panel-a,.plan-panel-b{{display:none}}
 .plan-panel-a.show,.plan-panel-b.show{{display:block}}
-</style></head><body>
+body.lang-en .zh{{display:none}}
+body.lang-zh .en{{display:none}}
+</style></head><body class="lang-zh">
 
 <div class="plan-nav">
   <div class="inner">
-    <span class="label">方案切换：</span>
+    <span class="label">{t('方案切换：','Switch Plan:')}</span>
     <button class="plan-btn active-a" id="btn-a" onclick="switchPlan('a')">
-      A: 混合 ATM+OTM<br><span style="font-size:11px;font-weight:400">小跌+大跌都保护</span>
+      A: {t('混合 ATM+OTM','Mixed ATM+OTM')}<br><span style="font-size:11px;font-weight:400">{t('小跌+大跌都保护','Protects both small &amp; large drops')}</span>
     </button>
     <button class="plan-btn" id="btn-b" onclick="switchPlan('b')">
-      B: 纯OTM 省钱版<br><span style="font-size:11px;font-weight:400">只防崩盘，成本低约25-40%</span>
+      B: {t('纯OTM 省钱版','Pure OTM Budget')}<br><span style="font-size:11px;font-weight:400">{t('只防崩盘，成本低约25-40%','Crash-only protection, ~25-40% cheaper')}</span>
     </button>
+    <button class="lang-btn" id="lang-btn" onclick="toggleLang()" style="margin-left:auto;padding:8px 16px;border:2px solid #1a237e;border-radius:8px;background:white;cursor:pointer;font-size:13px;font-weight:700;color:#1a237e">EN</button>
   </div>
 </div>
 
 <div class="page">
 
-<h1>葡萄牙基金对冲方案</h1>
-<p class="meta">Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007)</p>
+<h1>{t('葡萄牙基金对冲方案','Portuguese Fund Hedge Analysis')}</h1>
+<p class="meta">{t('Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007)','Optimize Portugal Golden Opportunities Fund (PTOPZWHM0007)')}</p>
 
 <div class="data-bar">
   <div class="src">
-    数据来源：基金NAV &larr; <b>{live['fund_src']}</b> &middot; 指数 &larr; <b>Yahoo Finance</b><br>
+    {t('数据来源：基金NAV','Data Source: Fund NAV')} &larr; <b>{live['fund_src']}</b> &middot; {t('指数','Indices')} &larr; <b>Yahoo Finance</b><br>
     <span style="font-size:11px;color:#aaa">
-      基金NAV: {live['fund_date']} &middot;
+      {t('基金NAV','Fund NAV')}: {live['fund_date']} &middot;
       PSI20: {live['psi_date']} &middot;
       IBEX35: {live['ibex_date']} &middot;
       ESTOXX50: {live['estx_date']}
     </span><br>
-    <span style="font-size:11px;color:#aaa">重新运行 <code style="background:#eee;padding:1px 5px;border-radius:3px">python3 hedge_final.py</code> 即可刷新全部数据至最新交易日</span>
+    <span style="font-size:11px;color:#aaa">{t('重新运行','Re-run')} <code style="background:#eee;padding:1px 5px;border-radius:3px">python3 hedge_final.py</code> {t('即可刷新全部数据至最新交易日','to refresh all data to the latest trading day')}</span>
   </div>
   <div style="text-align:right;min-width:140px">
-    <div style="font-size:11px;color:#888">报告生成于</div>
+    <div style="font-size:11px;color:#888">{t('报告生成于','Report generated at')}</div>
     <div style="font-size:15px;font-weight:800;color:#1a237e">{gen_time}</div>
     <div class="timer" id="timer"></div>
   </div>
 </div>
 
 <div class="section">
-<h2>一、持仓概况</h2>
+<h2>{t('一、持仓概况','Section 1: Holdings Overview')}</h2>
 <div class="cards">
-  <div class="card green"><div class="lbl">买入成本</div><div class="val">&euro;{INITIAL_INV:,}</div><div class="sub">2024.07 NAV &euro;{FUND_ENTRY_PRICE:.2f}</div></div>
-  <div class="card green"><div class="lbl">当前市值</div><div class="val">&euro;{fv:,}</div><div class="sub">NAV &euro;{fund_nav:.2f}</div></div>
-  <div class="card purple"><div class="lbl">浮盈</div><div class="val">{"+" if fv>=INITIAL_INV else ""}&euro;{fv-INITIAL_INV:,}</div><div class="sub">{fg:+.1f}%</div></div>
-  <div class="card orange"><div class="lbl">PSI20</div><div class="val">{psi_now:,.0f}</div><div class="sub">买入时{PSI20_ENTRY_ACT:,}</div></div>
+  <div class="card green"><div class="lbl">{t('买入成本','Entry Cost')}</div><div class="val">&euro;{INITIAL_INV:,}</div><div class="sub">2024.07 NAV &euro;{FUND_ENTRY_PRICE:.2f}</div></div>
+  <div class="card green"><div class="lbl">{t('当前市值','Current Value')}</div><div class="val">&euro;{fv:,}</div><div class="sub">NAV &euro;{fund_nav:.2f}</div></div>
+  <div class="card purple"><div class="lbl">{t('浮盈','Unrealized Gain')}</div><div class="val">{"+" if fv>=INITIAL_INV else ""}&euro;{fv-INITIAL_INV:,}</div><div class="sub">{fg:+.1f}%</div></div>
+  <div class="card orange"><div class="lbl">PSI20</div><div class="val">{psi_now:,.0f}</div><div class="sub">{t('买入时','At entry')}{PSI20_ENTRY_ACT:,}</div></div>
 </div>
 <div style="display:flex;gap:14px;margin-bottom:12px;font-size:12px;color:#888">
   <span>IBEX35: <b style="color:#e65100">{ibex_now:,.0f}</b></span>
@@ -679,149 +693,138 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 </div>
 <div class="chart-box"><div id="c1" style="height:340px"></div></div>
 <div class="alert a-warn">
-  <b>担忧：</b>俄乌停战、欧盟加息、美欧关税等全欧系统性事件导致大跌。计划持有5年，想买保险。
+  <b>{t('担忧：','Concern:')}</b>{t('俄乌停战、欧盟加息、美欧关税等全欧系统性事件导致大跌。计划持有5年，想买保险。','Systemic European events (Russia-Ukraine ceasefire, ECB rate hikes, US-EU tariffs) could cause a major crash. Planning to hold for 5 years and want insurance.')}
 </div>
 </div>
 
 <div class="section">
-<h2>二、历史{nt}次急跌：IBEX全部同步</h2>
+<h2>{t('二、历史'+str(nt)+'次急跌：IBEX全部同步','Section 2: '+str(nt)+' Historical Crashes — IBEX Always in Sync')}</h2>
 <div class="chart-box"><div id="c2" style="height:460px"></div></div>
-<p class="note-sm">图中绿色编号标记对应下表中的10次急跌事件。点击表格行查看放大详情。</p>
+<p class="note-sm">{t('图中绿色编号标记对应下表中的急跌事件。点击表格行查看放大详情。','Green numbered markers in the chart correspond to crash events in the table below. Click rows for zoom details.')}</p>
 
 <table>
-  <tr><th>#</th><th>时期</th><th>基金1周跌</th><th>IBEX&plusmn;2周跌</th><th>IBEX点位变化</th><th>急跌比率<br><span style="font-weight:400;font-size:9px">基金跌/IBEX跌</span></th></tr>
+  <tr><th>#</th><th>{t('时期','Period')}</th><th>{t('基金1周跌','Fund 1-wk Drop')}</th><th>IBEX&plusmn;{t('2周跌','2-wk Drop')}</th><th>{t('IBEX点位变化','IBEX Level Change')}</th><th>{t('急跌比率','Crash Ratio')}<br><span style="font-weight:400;font-size:9px">{t('基金跌/IBEX跌','Fund drop/IBEX drop')}</span></th></tr>
   {hist_rows}
 </table>
 
 <div class="alert a-good">
-  <b>{nt}次急跌（1周跌>3%），IBEX在&plusmn;2周内全部同步下跌，0次脱钩。</b><br>
-  IBEX平均跌幅{np.mean([e['ibex_chg'] for e in events]):.1f}%，比基金平均跌幅{np.mean([e['fund_chg'] for e in events]):.1f}%更大。<br>
-  <span style="font-size:13px">急跌比率（基金跌幅/IBEX跌幅）平均<b>{avg_crash_ratio:.3f}</b>，范围{min(crash_ratios):.3f}~{max(crash_ratios):.3f}。
-  高于全样本Beta={BETA_FUND_IBEX}，说明<b>急跌时基金对IBEX的敏感度比平时更高</b>（条件Beta效应）。</span>
+  <b>{t(str(nt)+'次急跌（1周跌&gt;3%），IBEX在&plusmn;2周内全部同步下跌，0次脱钩。','All '+str(nt)+' crashes (1-wk drop &gt;3%) saw IBEX decline in sync within &plusmn;2 weeks. Zero decoupling.')}</b><br>
+  {t(f'IBEX平均跌幅{np.mean([e["ibex_chg"] for e in events]):.1f}%，比基金平均跌幅{np.mean([e["fund_chg"] for e in events]):.1f}%更大。',f'IBEX avg drop {np.mean([e["ibex_chg"] for e in events]):.1f}%, larger than fund avg drop {np.mean([e["fund_chg"] for e in events]):.1f}%.')}<br>
+  <span style="font-size:13px">{t(f'急跌比率（基金跌幅/IBEX跌幅）平均<b>{avg_crash_ratio:.3f}</b>，范围{min(crash_ratios):.3f}~{max(crash_ratios):.3f}。高于全样本Beta={BETA_FUND_IBEX}，说明<b>急跌时基金对IBEX的敏感度比平时更高</b>（条件Beta效应）。',f'Crash ratio (fund drop / IBEX drop) averages <b>{avg_crash_ratio:.3f}</b>, range {min(crash_ratios):.3f}~{max(crash_ratios):.3f}. Higher than full-sample Beta={BETA_FUND_IBEX}, indicating <b>higher fund sensitivity to IBEX during crashes</b> (conditional Beta effect).')}</span>
 </div>
 
-<p style="margin-bottom:8px"><b>点击查看每次事件的放大走势：</b></p>
+<p style="margin-bottom:8px"><b>{t('点击查看每次事件的放大走势：','Click to view zoomed chart for each event:')}</b></p>
 <div class="tab-bar">{tab_btns}</div>
 {tab_panels}
 </div>
 
 <div class="section">
-<h2>三、对冲链路与Beta说明</h2>
+<h2>{t('三、对冲链路与Beta说明','Section 3: Hedge Chain &amp; Beta Explanation')}</h2>
 <div class="chain">
-  <div class="chain-node"><div style="font-size:12px;color:#888">你持有的</div><div style="font-size:17px;font-weight:800;color:#1565c0">葡萄牙基金</div></div>
+  <div class="chain-node"><div style="font-size:12px;color:#888">{t('你持有的','You hold')}</div><div style="font-size:17px;font-weight:800;color:#1565c0">{t('葡萄牙基金','PT Fund')}</div></div>
   <div class="chain-arrow">&rarr;</div>
-  <div class="chain-node"><div style="font-size:12px;color:#888">高度跟踪</div><div style="font-size:17px;font-weight:800;color:#ff7f0e">PSI20</div><div style="font-size:11px;color:#2e7d32">R&sup2;=79%</div></div>
+  <div class="chain-node"><div style="font-size:12px;color:#888">{t('高度跟踪','Closely tracks')}</div><div style="font-size:17px;font-weight:800;color:#ff7f0e">PSI20</div><div style="font-size:11px;color:#2e7d32">R&sup2;=79%</div></div>
   <div class="chain-arrow">&rarr;</div>
-  <div class="chain-node" style="border:2px solid #c62828"><div style="font-size:12px;color:#c62828">PSI20无可用期权</div></div>
+  <div class="chain-node" style="border:2px solid #c62828"><div style="font-size:12px;color:#c62828">{t('PSI20无可用期权','No listed options on PSI20')}</div></div>
   <div class="chain-arrow">&rarr;</div>
-  <div class="chain-node" style="border:2px solid #2e7d32"><div style="font-size:12px;color:#2e7d32">替代</div><div style="font-size:17px;font-weight:800;color:#e65100">IBEX35 Put</div><div style="font-size:11px;color:#888">MEFF &middot; IBKR可交易</div></div>
+  <div class="chain-node" style="border:2px solid #2e7d32"><div style="font-size:12px;color:#2e7d32">{t('替代','Proxy')}</div><div style="font-size:17px;font-weight:800;color:#e65100">IBEX35 Put</div><div style="font-size:11px;color:#888">MEFF &middot; {t('IBKR可交易','Tradable on IBKR')}</div></div>
 </div>
 <div class="alert a-info">
-  合约数量按Beta(基金/IBEX)={BETA_FUND_IBEX}计算：基金对IBEX的敏感度为42%，
-  需要对冲的名义敞口=&euro;{fv:,}&times;{BETA_FUND_IBEX}=&euro;{round(fv*BETA_FUND_IBEX):,}，
-  除以IBEX点位=<b>{N_CONTRACTS}张Mini合约</b>（乘数&euro;1/点）。
+  {t('合约数量按Beta(基金/IBEX)='+str(BETA_FUND_IBEX)+'计算：基金对IBEX的敏感度为42%，','Contract count based on Beta(Fund/IBEX)='+str(BETA_FUND_IBEX)+': fund sensitivity to IBEX is 42%,')}
+  {t('需要对冲的名义敞口','notional exposure to hedge')}=&euro;{fv:,}&times;{BETA_FUND_IBEX}=&euro;{round(fv*BETA_FUND_IBEX):,}{t('，除以IBEX点位','/ IBEX level')}=<b>{N_CONTRACTS} {t('张Mini合约','Mini contracts')}</b>{t('（乘数&euro;1/点）。','(multiplier &euro;1/pt).')}
 </div>
 <div class="alert a-warn">
-  <b>Beta说明</b>：以下三个Beta是分别独立回归的结果，<b>不是</b>链式推导关系：<br>
-  &middot; Beta(基金/PSI20) = {BETA_FUND_PSI}（R&sup2;=79%，基金跟踪PSI20较好）<br>
-  &middot; Beta(基金/IBEX) = {BETA_FUND_IBEX}（R&sup2;=42%，IBEX只能解释基金42%的波动）<br>
-  &middot; Beta(IBEX/PSI20) = {BETA_IBEX_PSI}（用于PSI20场景→IBEX点位换算）<br>
-  <span style="font-size:12px;color:#888">注：R&sup2;=42%意味着基金有58%的波动无法被IBEX解释。Put只对冲IBEX相关的那42%风险。</span>
+  <b>{t('Beta说明','Beta Explanation')}</b>{t('：以下三个Beta是分别独立回归的结果，',': The following three Betas are independently regressed results,')}<b>{t('不是','NOT')}</b>{t('链式推导关系：',' chain-derived:')}<br>
+  &middot; Beta({t('基金','Fund')}/PSI20) = {BETA_FUND_PSI}{t('（R&sup2;=79%，基金跟踪PSI20较好）',' (R&sup2;=79%, fund tracks PSI20 well)')}<br>
+  &middot; Beta({t('基金','Fund')}/IBEX) = {BETA_FUND_IBEX}{t('（R&sup2;=42%，IBEX只能解释基金42%的波动）',' (R&sup2;=42%, IBEX explains only 42% of fund variance)')}<br>
+  &middot; Beta(IBEX/PSI20) = {BETA_IBEX_PSI}{t('（用于PSI20场景→IBEX点位换算）',' (used for PSI20 scenario → IBEX level conversion)')}<br>
+  <span style="font-size:12px;color:#888">{t('注：R&sup2;=42%意味着基金有58%的波动无法被IBEX解释。Put只对冲IBEX相关的那42%风险。','Note: R&sup2;=42% means 58% of fund variance cannot be explained by IBEX. Puts only hedge the IBEX-correlated 42%.')}</span>
 </div>
 <div class="alert a-info">
-  <b>条件Beta（急跌时）</b>：上面的Beta={BETA_FUND_IBEX}是全样本（含平时+急跌）的平均值。
-  但实证显示，在{len(crash_ratios)}次急跌事件中，基金跌幅/IBEX跌幅的平均比率为<b>{avg_crash_ratio}</b>，
-  比全样本Beta高<b>{round((avg_crash_ratio/BETA_FUND_IBEX-1)*100)}%</b>。<br>
-  这意味着：急跌时基金对IBEX的真实敏感度更高。按Beta={BETA_FUND_IBEX}计算的16张合约，
-  在急跌时实际只能覆盖约<b>{round(BETA_FUND_IBEX/avg_crash_ratio*100)}%</b>的IBEX相关损失，而非理论上的100%。<br>
+  <b>{t('条件Beta（急跌时）','Conditional Beta (During Crashes)')}</b>{t('：上面的Beta='+str(BETA_FUND_IBEX)+'是全样本（含平时+急跌）的平均值。',': The above Beta='+str(BETA_FUND_IBEX)+' is the full-sample (calm + crash) average.')}
+  {t('但实证显示，在'+str(ncr)+'次急跌事件中，基金跌幅/IBEX跌幅的平均比率为','Empirical evidence shows that in '+str(ncr)+' crash events, the avg fund drop / IBEX drop ratio is')}<b>{avg_crash_ratio}</b>{t('，比全样本Beta高',', exceeding full-sample Beta by')}<b>{cr_pct_above}%</b>。<br>
+  {t('这意味着：急跌时基金对IBEX的真实敏感度更高。按Beta='+str(BETA_FUND_IBEX)+'计算的16张合约，在急跌时实际只能覆盖约','This means: true fund sensitivity to IBEX is higher during crashes. The 16 contracts based on Beta='+str(BETA_FUND_IBEX)+' can only cover about')}<b>{cov_pct_actual}%</b>{t('的IBEX相关损失，而非理论上的100%。',' of IBEX-related losses during crashes, not the theoretical 100%.')}<br>
   <span style="font-size:12px;color:#888">
-  学术背景：危机中跨市场相关性上升是公认现象（Longin &amp; Solnik 2001）。条件Beta &gt; 无条件Beta是正常的。
-  但10次样本量偏小（比率范围{min(crash_ratios):.3f}~{max(crash_ratios):.3f}），不宜过度精确化。
-  本报告仍以全样本Beta定合约数，但提醒用户实际覆盖率可能低于理论值。</span>
+  {t('学术背景：危机中跨市场相关性上升是公认现象（Longin &amp; Solnik 2001）。条件Beta &gt; 无条件Beta是正常的。','Academic background: Rising cross-market correlation during crises is well-documented (Longin &amp; Solnik 2001). Conditional Beta &gt; unconditional Beta is expected.')}
+  {t('但'+str(ncr)+'次样本量偏小（比率范围'+cr_min+'~'+cr_max+'），不宜过度精确化。','However, '+str(ncr)+' samples is small (ratio range '+cr_min+'~'+cr_max+'), so over-precision is unwarranted.')}
+  {t('本报告仍以全样本Beta定合约数，但提醒用户实际覆盖率可能低于理论值。','This report still uses full-sample Beta for contract sizing, but reminds users actual coverage may be lower than theoretical.')}</span>
 </div>
 </div>
 
 <div class="section">
-<h2>四、合约配置：混合行权价策略</h2>
+<h2>{t('四、合约配置：混合行权价策略','Section 4: Contract Configuration — Mixed Strike Strategy')}</h2>
 <div class="alert a-info">
-  <b>核心思路</b>：不必全买贵的ATM Put。用一部分预算买便宜的虚值OTM Put，张数更多，
-  大跌时赔付反而更高——同样的保费，换来更强的崩盘保护。
+  <b>{t('核心思路','Core Idea')}</b>{t('：不必全买贵的ATM Put。用一部分预算买便宜的虚值OTM Put，张数更多，大跌时赔付反而更高——同样的保费，换来更强的崩盘保护。',': No need to buy all expensive ATM Puts. Use part of the budget for cheaper OTM Puts — more contracts, higher payout in large crashes. Same premium, stronger crash protection.')}
 </div>
 <table>
-  <tr><th style="text-align:left">配置</th><th>年保费</th><th>5年总保费</th><th>IBEX跌5%</th><th>IBEX跌10%</th><th>IBEX跌20%</th><th>IBEX跌30%</th></tr>
+  <tr><th style="text-align:left">{t('配置','Config')}</th><th>{t('年保费','Annual Premium')}</th><th>{t('5年总保费','5-Year Total')}</th><th>{t('IBEX跌5%','IBEX -5%')}</th><th>{t('IBEX跌10%','IBEX -10%')}</th><th>{t('IBEX跌20%','IBEX -20%')}</th><th>{t('IBEX跌30%','IBEX -30%')}</th></tr>
   {opt_rows}
 </table>
 <div class="alert a-warn" style="font-size:13px">
-  <b>怎么读这张表</b>：<br>
-  &middot; <b>纯ATM ×16</b>：所有跌幅都有赔付，但大跌时赔付最少（因为只有16张）<br>
-  &middot; <b>ATM ×8 + 90%OTM ×20 [推荐]</b>：小跌仍有保护（8张ATM兜底），同预算但合约更多，大跌时赔付更高<br>
-  &middot; <b>纯90%OTM ×24</b>：最省钱，但10%以内的跌幅完全不赔<br>
-  OTM行权价={K_90:,}点（IBEX当前90%），ATM行权价={K:,}点
+  <b>{t('怎么读这张表','How to Read This Table')}</b>{t('：','：')}<br>
+  &middot; <b>{t('纯ATM ×16','Pure ATM ×16')}</b>{t('：所有跌幅都有赔付，但大跌时赔付最少（因为只有16张）',': Payout at all drop levels, but lowest payout in large crashes (only 16 contracts)')}<br>
+  &middot; <b>ATM ×8 + 90%OTM ×20 [{t('推荐','Recommended')}]</b>{t('：小跌仍有保护（8张ATM兜底），同预算但合约更多，大跌时赔付更高',': Still protected in small drops (8 ATM as floor), same budget but more contracts, higher payout in large crashes')}<br>
+  &middot; <b>{t('纯90%OTM ×24','Pure 90%OTM ×24')}</b>{t('：最省钱，但10%以内的跌幅完全不赔',': Cheapest, but zero payout for drops under 10%')}<br>
+  {t('OTM行权价','OTM Strike')}={K_90:,}{t('点（IBEX当前90%），ATM行权价','pts (90% of current IBEX), ATM Strike')}={K:,}{t('点','pts')}
 </div>
 <div class="alert a-bad">
-  <b>所有配置共同的局限</b>：Put赔付基于IBEX维度。基金实际损失取决于PSI20和基金自身因素（R&sup2;=42%），
-  Put无法覆盖IBEX以外58%的风险。在"先涨后跌"行情下，即使是ATM Put也可能因行权价被甩开而失效（Event #10、#11教训）。
+  <b>{t('所有配置共同的局限','Common Limitation of All Configs')}</b>{t('：Put赔付基于IBEX维度。基金实际损失取决于PSI20和基金自身因素（R&sup2;=42%），Put无法覆盖IBEX以外58%的风险。在"先涨后跌"行情下，即使是ATM Put也可能因行权价被甩开而失效（Event #10、#11教训）。',': Put payout is based on IBEX dimension. Actual fund losses depend on PSI20 and fund-specific factors (R&sup2;=42%). Puts cannot cover the 58% of risk unrelated to IBEX. In "rally-then-crash" scenarios, even ATM Puts may become ineffective as the strike gets left behind (lessons from Events #10, #11).')}
 </div>
 </div>
 
 <div class="section">
-<h2>五、滚仓频率对比</h2>
+<h2>{t('五、滚仓频率对比','Section 5: Rolling Frequency Comparison')}</h2>
 <table>
-  <tr><th style="text-align:left">策略</th><th>操作频率</th><th>年化成本</th><th>5年总成本</th></tr>
+  <tr><th style="text-align:left">{t('策略','Strategy')}</th><th>{t('操作频率','Frequency')}</th><th>{t('年化成本','Annualized Cost')}</th><th>{t('5年总成本','5-Year Total Cost')}</th></tr>
   {cost_rows}
 </table>
 <div class="alert a-info">
-  三种频率保护效果接近，但成本差距大。<b>12个月年滚花最少的钱，操作最简单。</b>
+  {t('三种频率保护效果接近，但成本差距大。','All three frequencies offer similar protection, but costs differ significantly.')}<b>{t('12个月年滚花最少的钱，操作最简单。','12-month annual rolling costs the least and is simplest to operate.')}</b>
 </div>
 </div>
 
 <!-- ===== Plan A: 六 ===== -->
 <div class="plan-panel-a show">
 <div class="section">
-<h2>六、推荐方案 A：混合行权价</h2>
+<h2>{t('六、推荐方案 A：混合行权价','Section 6: Recommended Plan A — Mixed Strike')}</h2>
 <div class="rec">
-  <h3>ATM Put &times;8 + 90%OTM Put &times;20，12个月年滚 + 动态滚仓</h3>
+  <h3>ATM Put &times;8 + 90%OTM Put &times;20{t('，12个月年滚 + 动态滚仓',', 12-Month Annual Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">ATM行权价</div><div class="rv">{rec['K']:,}点</div><div style="font-size:10px;color:#888">&times;8张</div></div>
-    <div class="rec-item"><div class="rl">OTM行权价</div><div class="rv">{K_90:,}点</div><div style="font-size:10px;color:#888">&times;20张（90% OTM）</div></div>
-    <div class="rec-item"><div class="rl">每年保费</div><div class="rv">&euro;{rec_prem:,}</div><div style="font-size:10px;color:#888">BS理论值，{rec_prem/fv*100:.2f}%</div></div>
-    <div class="rec-item"><div class="rl">5年总保费</div><div class="rv">&euro;{rec_prem*5:,}</div></div>
-    <div class="rec-item"><div class="rl">vs 纯ATM×16</div><div class="rv">同预算，合约更多</div></div>
+    <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv">{rec['K']:,}{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
+    <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv">{K_90:,}{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
+    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv">&euro;{rec_prem:,}</div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, {rec_prem/fv*100:.2f}%</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv">&euro;{rec_prem*5:,}</div></div>
+    <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
   </div>
 </div>
 <div class="alert a-info" style="font-size:13px">
-  <b>为什么混合配置</b>：同样~&euro;{rec_prem:,}/年预算，8张ATM保住小跌时的基本保护，
-  20张90%OTM在大跌时提供额外赔付（OTM单价仅ATM的40%，同预算可买更多张数）。
-  对比见上表第四列"IBEX跌30%"，混合配置赔付&euro;{options[1]['scenarios'][30]['payoff']:,} vs 纯ATM &euro;{options[0]['scenarios'][30]['payoff']:,}。
+  <b>{t('为什么混合配置','Why Mixed Config')}</b>{t('：同样~&euro;'+f'{rec_prem:,}'+'/年预算，8张ATM保住小跌时的基本保护，20张90%OTM在大跌时提供额外赔付（OTM单价仅ATM的40%，同预算可买更多张数）。对比见上表第四列"IBEX跌30%"，混合配置赔付',': With the same ~&euro;'+f'{rec_prem:,}'+'/yr budget, 8 ATM Puts retain basic protection for small drops, while 20 OTM Puts provide extra payout in large crashes (OTM is only 40% of ATM price, so same budget buys more contracts). See "IBEX -30%" column: mixed config pays')}&euro;{options[1]['scenarios'][30]['payoff']:,} vs {t('纯ATM','Pure ATM')} &euro;{options[0]['scenarios'][30]['payoff']:,}。
 </div>
 
-<p style="margin:16px 0 8px;font-weight:700">如果PSI20跌到…你的基金会怎样？</p>
+<p style="margin:16px 0 8px;font-weight:700">{t('如果PSI20跌到…你的基金会怎样？','What happens to your fund if PSI20 drops to…?')}</p>
 <table>
-  <tr><th>PSI20跌到</th><th>基金预估市值</th><th>预估亏损</th><th>Put赔付</th><th>对冲后市值</th><th>覆盖率</th></tr>
+  <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}</th></tr>
   {psi_rows}
 </table>
 <div class="alert a-warn" style="font-size:13px">
-  <b>线性模型局限</b>：上表覆盖率随跌幅递增——小跌时8张ATM独扛（覆盖率低），
-  大跌时20张OTM逐步启动、赔付加速上升（覆盖率可达50%以上）。这正是混合行权价策略的优势。<br>
-  但模型使用恒定Beta，极端行情下Beta会漂移、尾部相关性变化，实际覆盖率可能偏离。
-  实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时覆盖率可能<b>高于</b>此估计。<br>
-  <b>更重要的是</b>：此表假设Put行权价在事件发生时仍为ATM/OTM。如果IBEX在持有期内先涨后跌（如Event #10），
-  行权价被甩开变成深度虚值，实际覆盖率可能远低于表中数值。见下方"局限性"详细分析。
+  <b>{t('线性模型局限','Linear Model Limitation')}</b>{t('：上表覆盖率随跌幅递增——小跌时8张ATM独扛（覆盖率低），大跌时20张OTM逐步启动、赔付加速上升（覆盖率可达50%以上）。这正是混合行权价策略的优势。',': Coverage in the table above increases with drop size — in small drops only 8 ATM contracts carry the load (low coverage), while in large drops the 20 OTM contracts progressively activate with accelerating payout (coverage can exceed 50%). This is the advantage of a mixed-strike strategy.')}<br>
+  {t('但模型使用恒定Beta，极端行情下Beta会漂移、尾部相关性变化，实际覆盖率可能偏离。实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时覆盖率可能','The model uses constant Beta, but in extreme conditions Beta drifts and tail correlations change, so actual coverage may deviate. Empirical research shows cross-market correlation rises during crises (Longin &amp; Solnik 2001), so coverage in large drops may be')}<b>{t('高于','higher than')}</b>{t('此估计。',' this estimate.')}<br>
+  <b>{t('更重要的是','More importantly')}</b>{t('：此表假设Put行权价在事件发生时仍为ATM/OTM。如果IBEX在持有期内先涨后跌（如Event #10），行权价被甩开变成深度虚值，实际覆盖率可能远低于表中数值。见下方"局限性"详细分析。',': This table assumes Put strikes remain ATM/OTM when the event occurs. If IBEX rallies then crashes during the holding period (e.g., Event #10), strikes get left behind as deep OTM, and actual coverage could be far lower than shown. See "Limitations" section below.')}
 </div>
 <div class="chart-box"><div id="c5" style="height:360px"></div></div>
 
 <div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #388e3c">
-  <b style="font-size:16px">如果PSI20跌回买入时的{es['psi_target']:,}点？（方案A）</b><br>
-  <span style="font-size:13px;color:#888">PSI20从当前跌{es['psi_drop_pct']}%，IBEX估计跌到{es['ibex_est']:,}点（Beta换算，非等比回落）</span><br><br>
-  <b>不对冲：</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，亏损&euro;{es['fund_loss']:,}，浮盈保住<b>{es['no_hedge_kept']}%</b><br><br>
-  <b style="color:#2e7d32">方案A对冲后：</b><br>
-  <span style="display:inline-block;width:16px"></span>基金市值 <b>&euro;{es['fund_est']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>+ Put赔付 <b style="color:#2e7d32">+&euro;{es['pa_pay']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>&minus; 年保费 <b style="color:#c62828">&minus;&euro;{rec_prem:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>= 组合净值 <b style="color:#2e7d32;font-size:17px">&euro;{es['pa_net']:,}</b>
-  <span style="font-size:13px;color:#888">（vs 买入成本&euro;{INITIAL_INV:,}）</span><br>
-  <span style="display:inline-block;width:16px"></span><b style="color:#2e7d32">浮盈保住{es['pa_kept']}%</b>
-  <span style="font-size:13px;color:#888">（当前浮盈&euro;{es['gain_now']:,}，对冲后仍盈利&euro;{es['pa_net']-INITIAL_INV:,}）</span>
+  <b style="font-size:16px">{t('如果PSI20跌回买入时的'+f'{es["psi_target"]:,}'+'点？（方案A）','What if PSI20 drops back to entry level '+f'{es["psi_target"]:,}'+' pts? (Plan A)')}</b><br>
+  <span style="font-size:13px;color:#888">{t('PSI20从当前跌'+str(es['psi_drop_pct'])+'%，IBEX估计跌到'+f'{es["ibex_est"]:,}'+'点（Beta换算，非等比回落）','PSI20 drops '+str(es['psi_drop_pct'])+'% from current, IBEX est. drops to '+f'{es["ibex_est"]:,}'+' pts (Beta conversion, not proportional)')}</span><br><br>
+  <b>{t('不对冲：','Unhedged:')}</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>{t('，亏损',', loss')}&euro;{es['fund_loss']:,}{t('，浮盈保住',', unrealized gain retained')}<b>{es['no_hedge_kept']}%</b><br><br>
+  <b style="color:#2e7d32">{t('方案A对冲后：','Plan A Hedged:')}</b><br>
+  <span style="display:inline-block;width:16px"></span>{t('基金市值','Fund value')} <b>&euro;{es['fund_est']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32">+&euro;{es['pa_pay']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828">&minus;&euro;{rec_prem:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#2e7d32;font-size:17px">&euro;{es['pa_net']:,}</b>
+  <span style="font-size:13px;color:#888">(vs {t('买入成本','entry cost')}&euro;{INITIAL_INV:,})</span><br>
+  <span style="display:inline-block;width:16px"></span><b style="color:#2e7d32">{t('浮盈保住','Unrealized gain retained')}{es['pa_kept']}%</b>
+  <span style="font-size:13px;color:#888">({t('当前浮盈','current gain')}&euro;{es['gain_now']:,}{t('，对冲后仍盈利',', still profitable after hedge')}&euro;{es['pa_net']-INITIAL_INV:,})</span>
 </div>
 </div>
 </div>
@@ -829,52 +832,47 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <!-- ===== Plan B: 六 ===== -->
 <div class="plan-panel-b">
 <div class="section">
-<h2>六、推荐方案 B：纯OTM省钱版</h2>
+<h2>{t('六、推荐方案 B：纯OTM省钱版','Section 6: Recommended Plan B — Pure OTM Budget')}</h2>
 <div class="rec" style="border-color:#e65100;background:#fff3e0">
-  <h3 style="color:#e65100">纯90%OTM Put &times;24，12个月年滚 + 动态滚仓</h3>
+  <h3 style="color:#e65100">{t('纯90%OTM Put &times;24，12个月年滚 + 动态滚仓','Pure 90%OTM Put &times;24, 12-Month Annual Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">OTM行权价</div><div class="rv" style="color:#e65100">{K_90:,}点</div><div style="font-size:10px;color:#888">&times;24张（90% OTM）</div></div>
-    <div class="rec-item"><div class="rl">每年保费</div><div class="rv" style="color:#e65100">&euro;{planb_prem:,}</div><div style="font-size:10px;color:#888">BS理论值，{planb_prem/fv*100:.2f}%</div></div>
-    <div class="rec-item"><div class="rl">5年总保费</div><div class="rv" style="color:#e65100">&euro;{planb_prem*5:,}</div></div>
-    <div class="rec-item"><div class="rl">vs 方案A</div><div class="rv" style="color:#e65100">省{round((1-planb_prem/rec_prem)*100)}%保费</div></div>
-    <div class="rec-item"><div class="rl">代价</div><div class="rv" style="color:#c62828;font-size:16px">10%以内跌幅不赔</div></div>
+    <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100">{K_90:,}{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
+    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv" style="color:#e65100">&euro;{planb_prem:,}</div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, {planb_prem/fv*100:.2f}%</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100">&euro;{planb_prem*5:,}</div></div>
+    <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</div></div>
+    <div class="rec-item"><div class="rl">{t('代价','Trade-off')}</div><div class="rv" style="color:#c62828;font-size:16px">{t('10%以内跌幅不赔','No payout for drops under 10%')}</div></div>
   </div>
 </div>
 <div class="alert a-warn" style="font-size:13px">
-  <b>为什么是24张？</b>条件Beta（实证平均{avg_crash_ratio}）计算出基准约{round(fv*avg_crash_ratio/ibex_now)}张，
-  但急跌比率波动范围大（{min(crash_ratios):.2f}~{max(crash_ratios):.2f}），最差一次达{max(crash_ratios):.3f}。
-  取24张是在基准{round(fv*avg_crash_ratio/ibex_now)}张之上加约{round((24/round(fv*avg_crash_ratio/ibex_now)-1)*100)}%的安全边际，
-  以应对急跌比率高于平均值的情况。<br><br>
-  <b>方案B的逻辑</b>：如果你认为小幅回调（5-10%）可以承受，只想防范崩盘式暴跌（>10%），
-  那么全部买便宜的虚值Put，省下来的保费本身就是一种保护（少花钱=少损失确定成本）。<br>
-  <b>适合</b>：风险承受力较高、不想每年花太多保费的投资者。<br>
-  <b>不适合</b>：希望任何级别下跌都有赔付的投资者（请选方案A）。
+  <b>{t('为什么是24张？','Why 24 contracts?')}</b>{t('条件Beta（实证平均'+str(avg_crash_ratio)+'）计算出基准约'+str(round(fv*avg_crash_ratio/ibex_now))+'张，但急跌比率波动范围大（'+f'{min(crash_ratios):.2f}'+'~'+f'{max(crash_ratios):.2f}'+'），最差一次达'+f'{max(crash_ratios):.3f}'+'。取24张是在基准'+str(round(fv*avg_crash_ratio/ibex_now))+'张之上加约'+str(round((24/round(fv*avg_crash_ratio/ibex_now)-1)*100))+'%的安全边际，以应对急跌比率高于平均值的情况。','Conditional Beta (empirical avg '+str(avg_crash_ratio)+') gives a baseline of ~'+str(round(fv*avg_crash_ratio/ibex_now))+' contracts, but crash ratio varies widely ('+f'{min(crash_ratios):.2f}'+'~'+f'{max(crash_ratios):.2f}'+'), worst case '+f'{max(crash_ratios):.3f}'+'. 24 contracts adds ~'+str(round((24/round(fv*avg_crash_ratio/ibex_now)-1)*100))+'% safety margin above the '+str(round(fv*avg_crash_ratio/ibex_now))+' baseline to handle above-average crash ratios.')}<br><br>
+  <b>{t('方案B的逻辑','Plan B Logic')}</b>{t('：如果你认为小幅回调（5-10%）可以承受，只想防范崩盘式暴跌（>10%），那么全部买便宜的虚值Put，省下来的保费本身就是一种保护（少花钱=少损失确定成本）。',': If you can tolerate small pullbacks (5-10%) and only want to protect against crash-level drops (>10%), then buying all cheap OTM Puts makes sense — the saved premium is itself a form of protection (less spending = less certain loss).')}<br>
+  <b>{t('适合','Best for')}</b>{t('：风险承受力较高、不想每年花太多保费的投资者。',': Higher risk tolerance investors who want to minimize annual premium spending.')}<br>
+  <b>{t('不适合','Not for')}</b>{t('：希望任何级别下跌都有赔付的投资者（请选方案A）。',': Investors who want payout at any drop level (choose Plan A instead).')}
 </div>
 
-<p style="margin:16px 0 8px;font-weight:700">如果PSI20跌到…你的基金会怎样？（方案B）</p>
+<p style="margin:16px 0 8px;font-weight:700">{t('如果PSI20跌到…你的基金会怎样？（方案B）','What happens to your fund if PSI20 drops to…? (Plan B)')}</p>
 <table>
-  <tr><th>PSI20跌到</th><th>基金预估市值</th><th>预估亏损</th><th>Put赔付</th><th>对冲后市值</th><th>覆盖率</th></tr>
+  <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}</th></tr>
   {psi_rows_b}
 </table>
 <div class="alert a-info" style="font-size:13px">
-  注意：当PSI20只跌5-8%时，IBEX估计跌幅不足10%，OTM Put尚未进入实值区，赔付为零。
-  只有PSI20跌到较低水平（约7500以下），Put才开始大额赔付。
+  {t('注意：当PSI20只跌5-8%时，IBEX估计跌幅不足10%，OTM Put尚未进入实值区，赔付为零。只有PSI20跌到较低水平（约7500以下），Put才开始大额赔付。','Note: When PSI20 only drops 5-8%, IBEX estimated drop is under 10%, OTM Puts remain out of the money with zero payout. Only when PSI20 drops to lower levels (below ~7500) do the Puts begin significant payouts.')}
 </div>
 <div class="chart-box"><div id="c5b" style="height:360px"></div></div>
 
 <div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #e65100;background:#fff3e0;border-left:5px solid #e65100">
-  <b style="font-size:16px;color:#e65100">如果PSI20跌回买入时的{es['psi_target']:,}点？（方案B）</b><br>
-  <span style="font-size:13px;color:#888">PSI20从当前跌{es['psi_drop_pct']}%，IBEX估计跌到{es['ibex_est']:,}点（Beta换算，非等比回落）</span><br><br>
-  <b>不对冲：</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>，亏损&euro;{es['fund_loss']:,}，浮盈保住<b>{es['no_hedge_kept']}%</b><br><br>
-  <b style="color:#e65100">方案B对冲后：</b><br>
-  <span style="display:inline-block;width:16px"></span>基金市值 <b>&euro;{es['fund_est']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>+ Put赔付 <b style="color:#2e7d32">+&euro;{es['pb_pay']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>&minus; 年保费 <b style="color:#c62828">&minus;&euro;{planb_prem:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>= 组合净值 <b style="color:#e65100;font-size:17px">&euro;{es['pb_net']:,}</b>
-  <span style="font-size:13px;color:#888">（vs 买入成本&euro;{INITIAL_INV:,}）</span><br>
-  <span style="display:inline-block;width:16px"></span><b style="color:#e65100">浮盈保住{es['pb_kept']}%</b>
-  <span style="font-size:13px;color:#888">（当前浮盈&euro;{es['gain_now']:,}，对冲后仍盈利&euro;{es['pb_net']-INITIAL_INV:,}）</span><br><br>
-  <span style="font-size:13px;color:#888">对比方案A：保住浮盈{es['pa_kept']}%，多保{es['pa_kept']-es['pb_kept']}个百分点，但每年多花&euro;{rec_prem-planb_prem:,}保费。</span>
+  <b style="font-size:16px;color:#e65100">{t('如果PSI20跌回买入时的'+f'{es["psi_target"]:,}'+'点？（方案B）','What if PSI20 drops back to entry level '+f'{es["psi_target"]:,}'+' pts? (Plan B)')}</b><br>
+  <span style="font-size:13px;color:#888">{t('PSI20从当前跌'+str(es['psi_drop_pct'])+'%，IBEX估计跌到'+f'{es["ibex_est"]:,}'+'点（Beta换算，非等比回落）','PSI20 drops '+str(es['psi_drop_pct'])+'% from current, IBEX est. drops to '+f'{es["ibex_est"]:,}'+' pts (Beta conversion, not proportional)')}</span><br><br>
+  <b>{t('不对冲：','Unhedged:')}</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>{t('，亏损',', loss')}&euro;{es['fund_loss']:,}{t('，浮盈保住',', unrealized gain retained')}<b>{es['no_hedge_kept']}%</b><br><br>
+  <b style="color:#e65100">{t('方案B对冲后：','Plan B Hedged:')}</b><br>
+  <span style="display:inline-block;width:16px"></span>{t('基金市值','Fund value')} <b>&euro;{es['fund_est']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32">+&euro;{es['pb_pay']:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828">&minus;&euro;{planb_prem:,}</b><br>
+  <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#e65100;font-size:17px">&euro;{es['pb_net']:,}</b>
+  <span style="font-size:13px;color:#888">(vs {t('买入成本','entry cost')}&euro;{INITIAL_INV:,})</span><br>
+  <span style="display:inline-block;width:16px"></span><b style="color:#e65100">{t('浮盈保住','Unrealized gain retained')}{es['pb_kept']}%</b>
+  <span style="font-size:13px;color:#888">({t('当前浮盈','current gain')}&euro;{es['gain_now']:,}{t('，对冲后仍盈利',', still profitable after hedge')}&euro;{es['pb_net']-INITIAL_INV:,})</span><br><br>
+  <span style="font-size:13px;color:#888">{t('对比方案A：保住浮盈'+str(es['pa_kept'])+'%，多保'+str(es['pa_kept']-es['pb_kept'])+'个百分点，但每年多花&euro;'+f'{rec_prem-planb_prem:,}'+'保费。','Compared to Plan A: retains '+str(es['pa_kept'])+'% of gains, '+str(es['pa_kept']-es['pb_kept'])+' percentage points more, but costs &euro;'+f'{rec_prem-planb_prem:,}'+' more per year.')}</span>
 </div>
 </div>
 </div>
@@ -882,28 +880,24 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <!-- ===== Plan A: 七 ===== -->
 <div class="plan-panel-a show">
 <div class="section">
-<h2>七、操作步骤（方案A）</h2>
+<h2>{t('七、操作步骤（方案A）','Section 7: Operating Steps (Plan A)')}</h2>
 <div class="steps"><ol>
-  <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
-  <li><b>买第一腿——ATM Put &times;8</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{rec['K']:,}</b>（ATM，50点间距）。参考价约&euro;{rec['price']:,.0f}/张，8张合计约&euro;{round(rec['price']*8):,}。</li>
-  <li><b>买第二腿——90%OTM Put &times;20</b>：同到期月，行权价<b>{K_90:,}</b>（90% OTM）。参考价约&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/张，20张合计约&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}。</li>
-  <li><b>总保费</b>约&euro;{rec_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%）。
-  <b>实际市价预计上浮10-30%</b>，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV={IBEX_IMPLIED_VOL*100:.1f}%更高，
-  OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。</li>
-  <li><b>分腿动态滚仓</b>（关键！）：ATM腿和OTM腿职责不同，滚仓策略也不同：<br>
-  <b style="color:#1565c0">ATM×8（跟踪腿）</b>：IBEX涨超10%（>{round(ibex_now*1.10):,}）时<b>立即滚仓</b>——卖掉旧ATM Put，买入新ATM Put重设行权价。
-  ATM必须紧贴当前市场，否则小跌时赔不了（Event #10教训）。建议每月检查。<br>
-  <b style="color:#e65100">OTM×20（兜底腿）</b>：<b>不参与动态滚仓</b>，只做年度正常到期滚仓。
-  OTM买来就是防崩盘（-20%~-30%），IBEX涨10%后它从虚值10%变成虚值20%，但真来大崩盘时仍会深度实值，赔付差额有限。</li>
-  <li><b>到期前1个月滚仓</b>：ATM和OTM两条腿都正常到期滚仓，卖旧买新，周而复始。</li>
+  <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
+  <li><b>{t('买第一腿——ATM Put &times;8','Buy Leg 1 — ATM Put &times;8')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b>{rec['K']:,}</b>{t('（ATM，50点间距）。参考价约',' (ATM, 50-pt intervals). Ref. price ~')}&euro;{rec['price']:,.0f}/{t('张','contract')}{t('，8张合计约',', 8 contracts total ~')}&euro;{round(rec['price']*8):,}。</li>
+  <li><b>{t('买第二腿——90%OTM Put &times;20','Buy Leg 2 — 90%OTM Put &times;20')}</b>{t('：同到期月，行权价',': Same expiry month, strike')}<b>{K_90:,}</b> (90% OTM){t('。参考价约','. Ref. price ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/{t('张','contract')}{t('，20张合计约',', 20 contracts total ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}。</li>
+  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}&euro;{rec_prem:,} (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
+  <b>{t('实际市价预计上浮10-30%','Actual market price expected 10-30% higher')}</b>{t('，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV='+str(IBEX_IMPLIED_VOL*100)+'%更高，OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。',', especially OTM Puts due to volatility skew (actual IV ~22-25%, higher than the ATM IV='+str(IBEX_IMPLIED_VOL*100)+'% used in this report). OTM actual prices may be 30-50% above BS theoretical values. Always use IBKR/MEFF live quotes before placing orders.')}</li>
+  <li><b>{t('分腿动态滚仓','Split-Leg Dynamic Rolling')}</b>{t('（关键！）：ATM腿和OTM腿职责不同，滚仓策略也不同：',' (Critical!): ATM and OTM legs have different roles, so different rolling strategies:')}<br>
+  <b style="color:#1565c0">ATM×8{t('（跟踪腿）',' (Tracking Leg)')}</b>{t('：IBEX涨超10%（>'+f'{round(ibex_now*1.10):,}'+'）时',': When IBEX rises >10% (>'+f'{round(ibex_now*1.10):,}'+')' )}<b>{t('立即滚仓',' roll immediately')}</b>{t('——卖掉旧ATM Put，买入新ATM Put重设行权价。ATM必须紧贴当前市场，否则小跌时赔不了（Event #10教训）。建议每月检查。',' — sell old ATM Put, buy new ATM Put to reset strike. ATM must stay close to current market; otherwise it won&rsquo;t pay in small drops (Event #10 lesson). Check monthly.')}<br>
+  <b style="color:#e65100">OTM×20{t('（兜底腿）',' (Floor Leg)')}</b>{t('：','：')}<b>{t('不参与动态滚仓','Does NOT participate in dynamic rolling')}</b>{t('，只做年度正常到期滚仓。OTM买来就是防崩盘（-20%~-30%），IBEX涨10%后它从虚值10%变成虚值20%，但真来大崩盘时仍会深度实值，赔付差额有限。',', only annual expiry rolling. OTM is bought purely for crash protection (-20%~-30%). After IBEX rises 10%, it goes from 10% OTM to 20% OTM, but in a real crash it will still be deep ITM with limited payout difference.')}</li>
+  <li><b>{t('到期前1个月滚仓','Roll 1 Month Before Expiry')}</b>{t('：ATM和OTM两条腿都正常到期滚仓，卖旧买新，周而复始。',': Both ATM and OTM legs undergo normal expiry rolling — sell old, buy new, repeat.')}</li>
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
-  <b>分腿滚仓的成本优势</b>：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。<br>
-  &middot; <b>全部滚仓</b>（旧方案）：28张全滚，单次损耗 &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <b>&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4):,}</b>，每年2次 = &euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4)*2):,}/年<br>
-  &middot; <b>分腿滚仓</b>（推荐）：只滚8张ATM，单次损耗 &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b>&euro;{round(rec['price']*8*0.4):,}</b>，每年2次 = &euro;{round(rec['price']*8*0.4*2):,}/年<br>
-  &middot; <b>每年节省约&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2):,}</b>，5年节省约&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2*5):,}<br><br>
-  <b>代价</b>：在"连续大涨后崩盘"的极端场景中，未滚仓的OTM行权价较低，赔付会少约&euro;{round((ibex_now*0.1)*20):,}。
-  但这笔差额与5年节省的滚仓成本大致打平。在更常见的"涨后中小跌"场景中，OTM本来就不赔，分不分开滚没有区别。
+  <b>{t('分腿滚仓的成本优势','Cost Advantage of Split-Leg Rolling')}</b>{t('：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。',': Each dynamic trigger only rolls 8 ATM contracts (not all 28), significantly reducing rolling costs.')}<br>
+  &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <b>&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4):,}</b>{t('，每年2次',', 2x/yr')} = &euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4)*2):,}/{t('年','yr')}<br>
+  &middot; <b>{t('分腿滚仓','Split-Leg Rolling')}</b>{t('（推荐）：只滚8张ATM，单次损耗',' (recommended): only roll 8 ATM, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b>&euro;{round(rec['price']*8*0.4):,}</b>{t('，每年2次',', 2x/yr')} = &euro;{round(rec['price']*8*0.4*2):,}/{t('年','yr')}<br>
+  &middot; <b>{t('每年节省约','Annual savings ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2):,}</b>{t('，5年节省约',', 5-year savings ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2*5):,}<br><br>
+  <b>{t('代价','Trade-off')}</b>{t('：在"连续大涨后崩盘"的极端场景中，未滚仓的OTM行权价较低，赔付会少约',': In the extreme "sustained rally then crash" scenario, unrolled OTM strikes are lower, payout will be ~')}&euro;{round((ibex_now*0.1)*20):,}{t(' 少。但这笔差额与5年节省的滚仓成本大致打平。在更常见的"涨后中小跌"场景中，OTM本来就不赔，分不分开滚没有区别。',' less. But this difference roughly offsets the 5-year rolling cost savings. In the more common "rally then small drop" scenario, OTM wouldn&rsquo;t pay out anyway, so split vs. unified rolling makes no difference.')}
 </div>
 </div>
 </div>
@@ -911,70 +905,62 @@ tr:last-child td{{border:none}} tr:hover td{{background:#f5f5ff}}
 <!-- ===== Plan B: 七 ===== -->
 <div class="plan-panel-b">
 <div class="section">
-<h2>七、操作步骤（方案B）</h2>
+<h2>{t('七、操作步骤（方案B）','Section 7: Operating Steps (Plan B)')}</h2>
 <div class="steps"><ol>
-  <li><b>IBKR账户</b>：开通欧洲期权交易权限，交易所选MEFF。</li>
-  <li><b>买90%OTM Put &times;24</b>：搜索Mini IBEX期权，到期月<b>2027年3月</b>，类型Put，行权价<b>{K_90:,}</b>（90% OTM，50点间距）。参考价约&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/张，24张合计约&euro;{planb_prem:,}。</li>
-  <li><b>总保费</b>约&euro;{planb_prem:,}（Black-Scholes理论值，IV={IBEX_IMPLIED_VOL*100:.1f}%，r={ECB_RATE*100:.1f}%）。
-  <b>实际市价预计上浮30-50%</b>——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV={IBEX_IMPLIED_VOL*100:.1f}%。
-  实际年成本可能达&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}。下单前务必以IBKR/MEFF实际报价为准。</li>
-  <li><b>动态滚仓</b>：方案B全部是OTM Put，与方案A的分腿滚仓逻辑类似——
-  OTM的职责是防崩盘，IBEX涨10%后从虚值10%变成虚值20%，但大崩盘时仍会深度实值。
-  因此方案B<b>以年度正常滚仓为主</b>，不需要频繁动态触发。<br>
-  但如果IBEX<b>累计涨超20%</b>（>{round(ibex_now*1.20):,}），OTM行权价已严重脱离市场，此时应滚仓重设行权价。建议每月检查。</li>
-  <li><b>到期前1个月滚仓</b>：正常到期前卖旧买新，周而复始。</li>
+  <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
+  <li><b>{t('买90%OTM Put &times;24','Buy 90%OTM Put &times;24')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b>{K_90:,}</b>{t('（90% OTM，50点间距）。参考价约',' (90% OTM, 50-pt intervals). Ref. price ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/{t('张','contract')}{t('，24张合计约',', 24 contracts total ~')}&euro;{planb_prem:,}。</li>
+  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}&euro;{planb_prem:,} (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
+  <b>{t('实际市价预计上浮30-50%','Actual market price expected 30-50% higher')}</b>{t('——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV='+str(IBEX_IMPLIED_VOL*100)+'%。实际年成本可能达',' — OTM Puts have higher actual IV (~22-25%) due to volatility skew, well above ATM IV='+str(IBEX_IMPLIED_VOL*100)+'%. Actual annual cost may reach')}&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}{t('。下单前务必以IBKR/MEFF实际报价为准。','. Always use IBKR/MEFF live quotes before placing orders.')}</li>
+  <li><b>{t('动态滚仓','Dynamic Rolling')}</b>{t('：方案B全部是OTM Put，与方案A的分腿滚仓逻辑类似——OTM的职责是防崩盘，IBEX涨10%后从虚值10%变成虚值20%，但大崩盘时仍会深度实值。因此方案B',': Plan B is all OTM Puts, similar logic to Plan A&rsquo;s split-leg rolling — OTM&rsquo;s role is crash protection. After IBEX rises 10%, OTM goes from 10% to 20% OTM, but in a real crash it&rsquo;ll still be deep ITM. So Plan B')}<b>{t('以年度正常滚仓为主','primarily uses annual expiry rolling')}</b>{t('，不需要频繁动态触发。',', no frequent dynamic triggers needed.')}<br>
+  {t('但如果IBEX','But if IBEX')}<b>{t('累计涨超20%','rises more than 20% cumulatively')}</b> (&gt;{round(ibex_now*1.20):,}){t('，OTM行权价已严重脱离市场，此时应滚仓重设行权价。建议每月检查。',', OTM strikes are too far from market — roll to reset strikes. Check monthly.')}</li>
+  <li><b>{t('到期前1个月滚仓','Roll 1 Month Before Expiry')}</b>{t('：正常到期前卖旧买新，周而复始。',': Sell old, buy new before expiry, repeat.')}</li>
 </ol></div>
 <div class="alert a-warn" style="font-size:13px">
-  <b>方案B注意</b>：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。
-  如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。<br><br>
-  <b>方案B的滚仓成本优势</b>：因为以年度滚仓为主（动态触发阈值为20%，远高于方案A的10%），
-  预计每年额外动态滚仓0-1次，滚仓损耗远低于方案A。
-  即使触发1次：24&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4):,}。
-  方案B真实年化总成本 &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}（平均0.5次/年） = <b>&euro;{planb_prem + round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}</b>（未含skew上浮）。
+  <b>{t('方案B注意','Plan B Note')}</b>{t('：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。',': Since all contracts are OTM Puts, there is no payout during small pullbacks. This is intentional — lower cost in exchange for "crash-only" protection. If you find yourself worried about 5-10% pullbacks having no coverage, switch to Plan A.')}<br><br>
+  <b>{t('方案B的滚仓成本优势','Plan B Rolling Cost Advantage')}</b>{t('：因为以年度滚仓为主（动态触发阈值为20%，远高于方案A的10%），预计每年额外动态滚仓0-1次，滚仓损耗远低于方案A。',': Since annual rolling is primary (dynamic trigger threshold is 20%, much higher than Plan A&rsquo;s 10%), expect 0-1 extra dynamic rolls per year, far less rolling cost than Plan A.')}
+  {t('即使触发1次：','Even if triggered once: ')}24&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4):,}。
+  {t('方案B真实年化总成本','Plan B true annualized total cost')} &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,} ({t('平均0.5次/年','avg 0.5x/yr')}) = <b>&euro;{planb_prem + round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}</b> ({t('未含skew上浮','excl. skew markup')})。
 </div>
 </div>
 </div>
 
 <div class="section">
-<h2>八、局限性（必读）</h2>
+<h2>{t('八、局限性（必读）','Section 8: Limitations (Must Read)')}</h2>
 <div class="alert a-bad">
-  <b>Event #10 教训：年度滚仓的致命缺陷</b><br>
-  2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在2024年7月买入时的IBEX水平（约11,090点，注意：这是历史回测值，当前推荐行权价为{rec['K']:,}点），
-  到事件发生时IBEX已涨到13,484点，即使跌到11,786点仍在行权价<b>之上</b>——Put几乎是废纸，覆盖仅约5%。<br><br>
-  <b>结论</b>：固定年度滚仓在"先涨后跌"行情下保护形同虚设。这就是为什么操作步骤中加入了<b>动态滚仓触发</b>（IBEX涨超10%即提前滚仓重设行权价），并建议每月检查。
+  <b>{t('Event #10 教训：年度滚仓的致命缺陷','Event #10 Lesson: Fatal Flaw of Annual Rolling')}</b><br>
+  {t('2025年3-4月，基金跌7.4%（约&euro;49,000），这是持仓期最大一次回撤。但12月ATM Put的行权价设在2024年7月买入时的IBEX水平（约11,090点，注意：这是历史回测值，当前推荐行权价为'+f'{rec["K"]:,}'+'点），到事件发生时IBEX已涨到13,484点，即使跌到11,786点仍在行权价','In Mar-Apr 2025, the fund dropped 7.4% (~&euro;49,000), the largest drawdown during the holding period. But the 12M ATM Put strike was set at the July 2024 entry IBEX level (~11,090 pts, note: this is historical backtest value, current recommended strike is '+f'{rec["K"]:,}'+' pts). By the event, IBEX had rallied to 13,484 — even after dropping to 11,786 it was still')}<b>{t('之上','above the strike')}</b>{t('——Put几乎是废纸，覆盖仅约5%。',' — the Put was nearly worthless, covering only ~5%.')}<br><br>
+  <b>{t('结论','Conclusion')}</b>{t('：固定年度滚仓在"先涨后跌"行情下保护形同虚设。这就是为什么操作步骤中加入了',': Fixed annual rolling provides virtually no protection in "rally-then-crash" scenarios. This is why the operating steps include')}<b>{t('动态滚仓触发','dynamic rolling triggers')}</b>{t('（IBEX涨超10%即提前滚仓重设行权价），并建议每月检查。',' (roll early when IBEX rises >10% to reset strikes), and monthly checks are recommended.')}
 </div>
 <div class="alert a-warn">
   <ol style="margin:0 0 0 18px">
-    <li><b>这是减震垫，不是全额保险</b>：方案A的覆盖率随跌幅递增（小跌~24%，大跌可达~57%），方案B仅在IBEX跌超10%后才启动赔付。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。</li>
-    <li><b>保费是确定支出</b>：每年&euro;{rec_prem:,}（方案A），5年不出事白花&euro;{rec_prem*5:,}（组合的{rec_prem*5/fv*100:.1f}%）。</li>
-    <li><b>R&sup2;=42%的根本限制</b>：IBEX只能解释基金42%的波动。基金可能因为葡萄牙本地原因（个股暴雷、流动性危机）大跌而IBEX无动于衷，此时Put完全无效。</li>
-    <li><b>条件Beta高于无条件Beta</b>：全样本Beta={BETA_FUND_IBEX}用于计算合约数，但{len(crash_ratios)}次历史急跌中实际比率平均{avg_crash_ratio}（高{round((avg_crash_ratio/BETA_FUND_IBEX-1)*100)}%）。
-    这意味着16张合约在急跌时只能覆盖约{round(BETA_FUND_IBEX/avg_crash_ratio*100)}%的IBEX相关损失，
-    实际保护效果比场景表显示的更弱。样本量仅{len(crash_ratios)}次，比率波动大（{min(crash_ratios):.2f}~{max(crash_ratios):.2f}），结论存在不确定性。</li>
-    <li><b>线性模型在极端行情下失真</b>：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。</li>
-    <li><b>IV影响成本</b>：恐慌期Put更贵，尽量在平静期滚仓。</li>
+    <li><b>{t('这是减震垫，不是全额保险','This is a shock absorber, not full insurance')}</b>{t('：方案A的覆盖率随跌幅递增（小跌~24%，大跌可达~57%），方案B仅在IBEX跌超10%后才启动赔付。在先涨后跌场景下可能远低于此。即使加入动态滚仓，也无法保证覆盖率。',': Plan A coverage increases with drop size (small drops ~24%, large drops up to ~57%). Plan B only activates after IBEX drops >10%. In rally-then-crash scenarios, coverage may be far lower. Even with dynamic rolling, coverage cannot be guaranteed.')}</li>
+    <li><b>{t('保费是确定支出','Premium is a certain cost')}</b>{t('：每年&euro;'+f'{rec_prem:,}'+'（方案A），5年不出事白花&euro;'+f'{rec_prem*5:,}'+'（组合的'+f'{rec_prem*5/fv*100:.1f}'+'%）。',': &euro;'+f'{rec_prem:,}'+'/yr (Plan A), if nothing happens in 5 years you spend &euro;'+f'{rec_prem*5:,}'+' ('+f'{rec_prem*5/fv*100:.1f}'+'% of portfolio) for nothing.')}</li>
+    <li><b>{t('R&sup2;=42%的根本限制','Fundamental R&sup2;=42% limitation')}</b>{t('：IBEX只能解释基金42%的波动。基金可能因为葡萄牙本地原因（个股暴雷、流动性危机）大跌而IBEX无动于衷，此时Put完全无效。',': IBEX explains only 42% of fund variance. The fund could crash due to Portugal-specific factors (stock blowups, liquidity crisis) while IBEX is unaffected — Puts would be completely useless.')}</li>
+    <li><b>{t('条件Beta高于无条件Beta','Conditional Beta exceeds unconditional Beta')}</b>{t('：全样本Beta='+str(BETA_FUND_IBEX)+'用于计算合约数，但'+str(ncr)+'次历史急跌中实际比率平均'+str(avg_crash_ratio)+'（高'+str(cr_pct_above)+'%）。这意味着16张合约在急跌时只能覆盖约'+str(cov_pct_actual)+'%的IBEX相关损失，实际保护效果比场景表显示的更弱。样本量仅'+str(ncr)+'次，比率波动大（'+f'{min(crash_ratios):.2f}'+'~'+f'{max(crash_ratios):.2f}'+'），结论存在不确定性。',': Full-sample Beta='+str(BETA_FUND_IBEX)+' is used for contract sizing, but in '+str(ncr)+' historical crashes the actual ratio averaged '+str(avg_crash_ratio)+' ('+str(cr_pct_above)+'% higher). This means 16 contracts can only cover ~'+str(cov_pct_actual)+'% of IBEX-related losses during crashes — weaker than scenario tables suggest. Sample size is only '+str(ncr)+', with high ratio volatility ('+f'{min(crash_ratios):.2f}'+'~'+f'{max(crash_ratios):.2f}'+'), so conclusions carry uncertainty.')}</li>
+    <li><b>{t('线性模型在极端行情下失真','Linear model breaks down in extreme conditions')}</b>{t('：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。',': Scenario tables use constant Beta, but in extreme tail events Beta drifts and coverage may deviate from expectations.')}</li>
+    <li><b>{t('IV影响成本','IV affects cost')}</b>{t('：恐慌期Put更贵，尽量在平静期滚仓。',': Puts are more expensive during panic periods. Try to roll during calm markets.')}</li>
   </ol>
 </div>
 </div>
 
 <div class="section">
-<h2>九、总结</h2>
+<h2>{t('九、总结','Section 9: Summary')}</h2>
 <div class="plan-panel-a show">
 <div class="alert a-note" style="font-size:14px;line-height:1.9">
-  <b style="font-size:17px;color:#4a148c">方案A：ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓</b><br>
-  <b>能做到的</b>：历史{nt}次急跌IBEX 100%同步下跌。混合配置用同样预算换更多合约，大跌时赔付高于纯ATM×16，同时8张ATM保留小跌保护。<br>
-  <b>做不到的</b>：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。<br>
-  <b>成本</b>：年化{rec_prem/fv*100:.2f}%（&euro;{rec_prem:,}/年），5年约&euro;{rec_prem*5:,}，是确定的支出。<br>
-  <b>本质</b>：这是一个减震垫，不是全额保险。它降低了系统性暴跌中的最大亏损幅度，但不能保证你不亏钱。
+  <b style="font-size:17px;color:#4a148c">{t('方案A：ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓','Plan A: ATM &times;8 + 90%OTM &times;20, 12-Month Annual Roll + Dynamic Rolling')}</b><br>
+  <b>{t('能做到的','What it can do')}</b>{t('：历史'+str(nt)+'次急跌IBEX 100%同步下跌。混合配置用同样预算换更多合约，大跌时赔付高于纯ATM×16，同时8张ATM保留小跌保护。',': In all '+str(nt)+' historical crashes, IBEX dropped 100% in sync. Mixed config uses the same budget for more contracts, higher payout in large drops vs pure ATM×16, while 8 ATM contracts retain small-drop protection.')}<br>
+  <b>{t('做不到的','What it cannot do')}</b>{t('：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。',': Cannot cover the 58% of risk unrelated to IBEX (R&sup2;=42%). In "rally-then-crash" scenarios, Puts may become nearly worthless without timely dynamic rolling.')}<br>
+  <b>{t('成本','Cost')}</b>{t('：年化'+f'{rec_prem/fv*100:.2f}'+'%（&euro;'+f'{rec_prem:,}'+'/年），5年约&euro;'+f'{rec_prem*5:,}'+'，是确定的支出。',': Annualized '+f'{rec_prem/fv*100:.2f}'+'% (&euro;'+f'{rec_prem:,}'+'/yr), ~&euro;'+f'{rec_prem*5:,}'+' over 5 years — a certain cost.')}<br>
+  <b>{t('本质','In essence')}</b>{t('：这是一个减震垫，不是全额保险。它降低了系统性暴跌中的最大亏损幅度，但不能保证你不亏钱。',': This is a shock absorber, not full insurance. It reduces maximum loss magnitude during systemic crashes, but cannot guarantee you won&rsquo;t lose money.')}
 </div>
 </div>
 <div class="plan-panel-b">
 <div class="alert a-note" style="font-size:14px;line-height:1.9;border-color:#e65100;background:#fff3e0">
-  <b style="font-size:17px;color:#e65100">方案B：纯90%OTM &times;24，12个月年滚 + 动态滚仓</b><br>
-  <b>能做到的</b>：在崩盘式暴跌（>10%）时提供赔付，成本比方案A低{round((1-planb_prem/rec_prem)*100)}%。<br>
-  <b>做不到的</b>：5-10%的中等回调完全没有保护。同样无法覆盖IBEX以外58%的风险。<br>
-  <b>成本</b>：年化{planb_prem/fv*100:.2f}%（&euro;{planb_prem:,}/年），5年约&euro;{planb_prem*5:,}。<br>
-  <b>适合</b>：能承受中等回调、只想防黑天鹅的投资者。省下的保费本身也是一种保护。
+  <b style="font-size:17px;color:#e65100">{t('方案B：纯90%OTM &times;24，12个月年滚 + 动态滚仓','Plan B: Pure 90%OTM &times;24, 12-Month Annual Roll + Dynamic Rolling')}</b><br>
+  <b>{t('能做到的','What it can do')}</b>{t('：在崩盘式暴跌（>10%）时提供赔付，成本比方案A低'+str(round((1-planb_prem/rec_prem)*100))+'%。',': Provides payout during crash-level drops (>10%), '+str(round((1-planb_prem/rec_prem)*100))+'% cheaper than Plan A.')}<br>
+  <b>{t('做不到的','What it cannot do')}</b>{t('：5-10%的中等回调完全没有保护。同样无法覆盖IBEX以外58%的风险。',': Zero protection for 5-10% medium pullbacks. Also cannot cover the 58% of risk unrelated to IBEX.')}<br>
+  <b>{t('成本','Cost')}</b>{t('：年化'+f'{planb_prem/fv*100:.2f}'+'%（&euro;'+f'{planb_prem:,}'+'/年），5年约&euro;'+f'{planb_prem*5:,}'+'。',': Annualized '+f'{planb_prem/fv*100:.2f}'+'% (&euro;'+f'{planb_prem:,}'+'/yr), ~&euro;'+f'{planb_prem*5:,}'+' over 5 years.')}<br>
+  <b>{t('适合','Best for')}</b>{t('：能承受中等回调、只想防黑天鹅的投资者。省下的保费本身也是一种保护。',': Investors who can tolerate moderate pullbacks and only want black swan protection. The saved premium itself is a form of protection.')}
 </div>
 </div>
 </div>
@@ -1019,13 +1005,22 @@ if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});doc
     if(d<0)d=0;
     var dd=Math.floor(d/86400),hh=Math.floor(d%86400/3600),mm=Math.floor(d%3600/60);
     var parts=[];
-    if(dd>0)parts.push(dd+'天');
-    parts.push(hh+'时'+mm+'分');
-    el.textContent='已过 '+parts.join('')+'，建议每周刷新一次';
+    var isEn=document.body.classList.contains('lang-en');
+    if(dd>0)parts.push(dd+(isEn?' days':' 天'));
+    parts.push(hh+(isEn?'h':'时')+mm+(isEn?'m':'分'));
+    el.textContent=(isEn?'Elapsed: ':'已过 ')+parts.join('')+(isEn?', recommend refreshing weekly':'，建议每周刷新一次');
     if(dd>=7)el.style.color='#c62828';
   }}
   tick();setInterval(tick,60000);
 }})();
+function toggleLang(){{
+  var b=document.body, btn=document.getElementById('lang-btn');
+  if(b.classList.contains('lang-zh')){{
+    b.classList.remove('lang-zh');b.classList.add('lang-en');btn.textContent='中文';
+  }}else{{
+    b.classList.remove('lang-en');b.classList.add('lang-zh');btn.textContent='EN';
+  }}
+}}
 </script></body></html>"""
 
     html = html.replace('__C5B__',planb_chart).replace('__C1__',c1).replace('__C2__',c2).replace('__C5__',c5)
