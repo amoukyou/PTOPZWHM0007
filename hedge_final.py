@@ -1055,6 +1055,17 @@ body.lang-zh .en{{display:none}}
 <div class="alert a-warn">
   <b>{t('担忧：','Concern:')}</b>{t('俄乌停战、欧盟加息、美欧关税等全欧系统性事件导致大跌。计划持有5年，想买保险。','Systemic European events (Russia-Ukraine ceasefire, ECB rate hikes, US-EU tariffs) could cause a major crash. Planning to hold for 5 years and want insurance.')}
 </div>
+
+<div class="alert a-note" style="font-size:14px;line-height:1.8;border:2px solid #7b1fa2;border-radius:12px;padding:16px 20px">
+  <b style="font-size:16px;color:#4a148c">{t('一分钟决策摘要','1-Minute Decision Summary')}</b><br>
+  <b>{t('方案A','Plan A')}</b>{t('：买','：Buy ')}<b>ATM Put &times;8 + 90%OTM Put &times;20</b>{t(f'，到期月{put_expiry_label}，实际花费约',f', expiry {put_expiry_label}, actual cost ~')}<b style="color:#c62828">{f"€{round(_real_atm_ask*8+_real_otm_ask*20):,}" if _real_atm_ask and _real_otm_ask else f"€{rec_prem_raw:,}(BS)"}</b>{t(f'（{T_months}个月），小跌+大跌都保护',f' ({T_months}mo), protects both small &amp; large drops')}<br>
+  <b style="color:#e65100">{t('方案B','Plan B')}</b>{t('：买','：Buy ')}<b>90%OTM Put &times;24</b>{t(f'，到期月{put_expiry_label}，实际花费约',f', expiry {put_expiry_label}, actual cost ~')}<b style="color:#c62828">{f"€{round(_real_otm_ask*24):,}" if _real_otm_ask else f"€{planb_prem_raw:,}(BS)"}</b>{t(f'（{T_months}个月），只防崩盘、成本更低',f' ({T_months}mo), crash-only, lower cost')}<br>
+  <span style="font-size:12px;color:#888">{t('这是减震垫，不是全额保险。覆盖率24%-57%，R&sup2;=42%，58%的风险无法覆盖。详见下方分析。','This is a shock absorber, not full insurance. Coverage 24%-57%, R&sup2;=42%, 58% of risk uncovered. See analysis below.')}</span><br>
+  <span style="display:flex;gap:8px;margin-top:6px">
+    <a href="javascript:switchPlan('a');void(0)" style="padding:6px 16px;background:#e8f5e9;border:2px solid #388e3c;border-radius:8px;color:#1b5e20;font-weight:700;text-decoration:none;font-size:13px">{t('查看方案A详情','View Plan A Details')} &darr;</a>
+    <a href="javascript:switchPlan('b');void(0)" style="padding:6px 16px;background:#fff3e0;border:2px solid #e65100;border-radius:8px;color:#e65100;font-weight:700;text-decoration:none;font-size:13px">{t('查看方案B详情','View Plan B Details')} &darr;</a>
+  </span>
+</div>
 </div>
 
 <div class="section">
@@ -1069,6 +1080,7 @@ body.lang-zh .en{{display:none}}
 
 <div class="alert a-good">
   <b>{t(str(nt)+'次急跌（1周跌&gt;3%），IBEX在&plusmn;2周内全部同步下跌，0次脱钩。','All '+str(nt)+' crashes (1-wk drop &gt;3%) saw IBEX decline in sync within &plusmn;2 weeks. Zero decoupling.')}</b><br>
+  <span style="color:#c62828;font-size:13px">{t('但请注意：同步下跌&ne;损失被覆盖。历史模拟中Put覆盖率仅24%-57%（方案A），大量损失仍需自行承担。','Note: Synchronized decline &ne; loss coverage. In historical simulations Put coverage was only 24%-57% (Plan A); substantial losses must still be borne by the investor.')}</span><br>
   {t(f'IBEX平均跌幅{np.mean([e["ibex_chg"] for e in events]):.1f}%，比基金平均跌幅{np.mean([e["fund_chg"] for e in events]):.1f}%更大。',f'IBEX avg drop {np.mean([e["ibex_chg"] for e in events]):.1f}%, larger than fund avg drop {np.mean([e["fund_chg"] for e in events]):.1f}%.')}<br>
   <span style="font-size:13px">{t(f'急跌比率（基金跌幅/IBEX跌幅）平均<b>{avg_crash_ratio:.3f}</b>，范围{min(crash_ratios):.3f}~{max(crash_ratios):.3f}。高于全样本Beta={BETA_FUND_IBEX}，说明<b>急跌时基金对IBEX的敏感度比平时更高</b>（条件Beta效应）。',f'Crash ratio (fund drop / IBEX drop) averages <b>{avg_crash_ratio:.3f}</b>, range {min(crash_ratios):.3f}~{max(crash_ratios):.3f}. Higher than full-sample Beta={BETA_FUND_IBEX}, indicating <b>higher fund sensitivity to IBEX during crashes</b> (conditional Beta effect).')}</span>
 </div>
@@ -1151,6 +1163,7 @@ body.lang-zh .en{{display:none}}
 </div>
 
 <div class="alert a-info">
+  <b>{t('合约数量的推导','Contract Count Derivation')}</b>{t('：第三节用全样本Beta='+str(BETA_FUND_IBEX)+'计算出基准16张ATM。但条件Beta更高（实证平均'+str(avg_crash_ratio)+'），急跌时需要更多合约才能覆盖。混合行权价策略将一部分预算从贵的ATM转移到便宜的OTM——同样的年保费，总张数从16增加到28（方案A）或24（方案B），大跌时赔付显著提升。',': Section 3 used full-sample Beta='+str(BETA_FUND_IBEX)+' to derive a baseline of 16 ATM contracts. But conditional Beta is higher (empirical avg '+str(avg_crash_ratio)+'), requiring more contracts during crashes. The mixed-strike strategy reallocates budget from expensive ATM to cheaper OTM — same annual premium, total contracts increase from 16 to 28 (Plan A) or 24 (Plan B), with significantly higher crash payouts.')}<br>
   <b>{t('核心思路','Core Idea')}</b>{t('：不必全买贵的ATM Put。用一部分预算买便宜的虚值OTM Put，张数更多，大跌时赔付反而更高——同样的保费，换来更强的崩盘保护。',': No need to buy all expensive ATM Puts. Use part of the budget for cheaper OTM Puts — more contracts, higher payout in large crashes. Same premium, stronger crash protection.')}
 </div>
 <table>
@@ -1189,11 +1202,14 @@ body.lang-zh .en{{display:none}}
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t(f'本轮保费（{T_months}个月）',f'This Round ({T_months}mo)')}</div><div class="rv"><span id="dyn-pa-prem-raw">&euro;{rec_prem_raw:,}</span></div><div style="font-size:10px;color:#888">BS T={T_put:.2f}yr{f', MEFF Ask <b style="color:#c62828">€{round(_real_atm_ask*8+_real_otm_ask*20):,}</b>' if _real_atm_ask and _real_otm_ask else ''}</div></div>
-    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv"><span id="dyn-pa-prem">&euro;{rec_prem:,}</span></div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span>{f' | MEFF <b style="color:#c62828">€{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor):,}</b>/yr' if _real_atm_ask and _real_otm_ask else ''}</div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv">{f'<span style="color:#c62828">€{round(_real_atm_ask*8+_real_otm_ask*20):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem-raw">&euro;{rec_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask | BS理论: €{rec_prem_raw:,}' if _real_atm_ask and _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
+    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv">{f'<span style="color:#c62828">€{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem">&euro;{rec_prem:,}</span>'}</div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span>{f' | BS: €{rec_prem:,}/yr' if _real_atm_ask and _real_otm_ask else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}</div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
   </div>
+</div>
+<div class="alert a-info" style="font-size:12px;padding:8px 12px;margin-bottom:4px">
+  {t(f'年化保费 = 本轮保费 &divide; {T_put:.2f}年，仅用于不同期限间的可比性。你实际每轮支付的是<b>本轮保费</b>。',f'Annualized premium = round premium &divide; {T_put:.2f} years, for comparability only. You actually pay the <b>round premium</b> each time.')}
 </div>
 <div class="alert a-info" style="font-size:13px">
   <b>{t('为什么混合配置','Why Mixed Config')}</b>{t('：同样~&euro;'+f'{rec_prem:,}'+'/年预算，8张ATM保住小跌时的基本保护，20张90%OTM在大跌时提供额外赔付（OTM单价仅ATM的40%，同预算可买更多张数）。对比见上表第四列"IBEX跌30%"，混合配置赔付',': With the same ~&euro;'+f'{rec_prem:,}'+'/yr budget, 8 ATM Puts retain basic protection for small drops, while 20 OTM Puts provide extra payout in large crashes (OTM is only 40% of ATM price, so same budget buys more contracts). See "IBEX -30%" column: mixed config pays')}&euro;{options[1]['scenarios'][30]['payoff']:,} vs {t('纯ATM','Pure ATM')} &euro;{options[0]['scenarios'][30]['payoff']:,}。
@@ -1201,9 +1217,12 @@ body.lang-zh .en{{display:none}}
 
 <p style="margin:16px 0 8px;font-weight:700">{t('如果PSI20跌到…你的基金会怎样？','What happens to your fund if PSI20 drops to…?')}</p>
 <table>
-  <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}</th></tr>
+  <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}<br><span style="font-weight:400;font-size:9px">{t('仅IBEX维度','IBEX-related only')}</span></th></tr>
   <tbody id="psi-tbody-a">{psi_rows}</tbody>
 </table>
+<div class="alert a-info" style="font-size:12px;padding:8px 12px;margin-bottom:4px">
+  {t('覆盖率=Put赔付÷基金预估亏损。Put仅覆盖IBEX相关损失（R&sup2;=42%）。基金特有风险（58%部分）完全裸露，不在此覆盖率范围内。','Coverage = Put payout &divide; estimated fund loss. Puts only cover IBEX-related losses (R&sup2;=42%). Fund-specific risk (58% portion) is fully exposed and not included in this coverage ratio.')}
+</div>
 <div class="alert a-warn" style="font-size:13px">
   <b>{t('线性模型局限','Linear Model Limitation')}</b>{t('：上表覆盖率随跌幅递增——小跌时8张ATM独扛（覆盖率低），大跌时20张OTM逐步启动、赔付加速上升（覆盖率可达50%以上）。这正是混合行权价策略的优势。',': Coverage in the table above increases with drop size — in small drops only 8 ATM contracts carry the load (low coverage), while in large drops the 20 OTM contracts progressively activate with accelerating payout (coverage can exceed 50%). This is the advantage of a mixed-strike strategy.')}<br>
   {t('但模型使用恒定Beta，极端行情下Beta会漂移、尾部相关性变化，实际覆盖率可能偏离。实证研究表明危机中跨市场相关性趋于上升（Longin &amp; Solnik 2001），大跌时覆盖率可能','The model uses constant Beta, but in extreme conditions Beta drifts and tail correlations change, so actual coverage may deviate. Empirical research shows cross-market correlation rises during crises (Longin &amp; Solnik 2001), so coverage in large drops may be')}<b>{t('高于','higher than')}</b>{t('此估计。',' this estimate.')}<br>
@@ -1235,9 +1254,9 @@ body.lang-zh .en{{display:none}}
   <h3 style="color:#e65100">{t(f'纯90%OTM Put &times;24，{T_months}个月滚仓 + 动态滚仓',f'Pure 90%OTM Put &times;24, {T_months}-Month Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t(f'本轮保费（{T_months}个月）',f'This Round ({T_months}mo)')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem-raw">&euro;{planb_prem_raw:,}</span></div><div style="font-size:10px;color:#888">BS T={T_put:.2f}yr{f', MEFF Ask <b style="color:#c62828">€{round(_real_otm_ask*24):,}</b>' if _real_otm_ask else ''}</div></div>
-    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem">&euro;{planb_prem:,}</span></div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span>{f' | MEFF <b style="color:#c62828">€{round(_real_otm_ask*24*annual_factor):,}</b>/yr' if _real_otm_ask else ''}</div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*annual_factor*5):,}</div>' if _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem-raw">&euro;{planb_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask | BS理论: €{planb_prem_raw:,}' if _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
+    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24*annual_factor):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem">&euro;{planb_prem:,}</span>'}</div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span>{f' | BS: €{planb_prem:,}/yr' if _real_otm_ask else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}</div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*annual_factor*5):,}</div>' if _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-save">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</span></div></div>
     <div class="rec-item"><div class="rl">{t('代价','Trade-off')}</div><div class="rv" style="color:#c62828;font-size:16px">{t('10%以内跌幅不赔','No payout for drops under 10%')}</div></div>
   </div>
@@ -1251,7 +1270,7 @@ body.lang-zh .en{{display:none}}
 
 <p style="margin:16px 0 8px;font-weight:700">{t('如果PSI20跌到…你的基金会怎样？（方案B）','What happens to your fund if PSI20 drops to…? (Plan B)')}</p>
 <table>
-  <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}</th></tr>
+  <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}<br><span style="font-weight:400;font-size:9px">{t('仅IBEX维度','IBEX-related only')}</span></th></tr>
   <tbody id="psi-tbody-b">{psi_rows_b}</tbody>
 </table>
 <div class="alert a-info" style="font-size:13px">
@@ -1293,7 +1312,8 @@ body.lang-zh .en{{display:none}}
   <li><b>{t('到期前1个月滚仓','Roll 1 Month Before Expiry')}</b>{t('：ATM和OTM两条腿都正常到期滚仓，卖旧买新，周而复始。',': Both ATM and OTM legs undergo normal expiry rolling — sell old, buy new, repeat.')}</li>
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
-  <b>{t('分腿滚仓的成本优势','Cost Advantage of Split-Leg Rolling')}</b>{t('：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。',': Each dynamic trigger only rolls 8 ATM contracts (not all 28), significantly reducing rolling costs.')}<br>
+  <b>{t('分腿滚仓的成本优势','Cost Advantage of Split-Leg Rolling')}</b>{t('：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。',': Each dynamic trigger only rolls 8 ATM contracts (not all 28), significantly reducing rolling costs.')}
+  <span style="font-size:11px;color:#888">({t('下方滚仓损耗按"损失旧Put约40%时间价值"粗略估算，实际取决于剩余期限、IV水平和bid-ask spread，视市场条件而定。','Rolling cost below is a rough estimate based on "losing ~40% of old Put time value"; actual cost depends on remaining maturity, IV level, and bid-ask spread, varying with market conditions.')})</span><br>
   &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,T_put)):,}&times;40% = <b><span id="dyn-s7-roll-full">&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,T_put)*20*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-full-yr">&euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,T_put)*20*0.4)*2):,}</span>/{t('年','yr')}<br>
   &middot; <b>{t('分腿滚仓','Split-Leg Rolling')}</b>{t('（推荐）：只滚8张ATM，单次损耗',' (recommended): only roll 8 ATM, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b><span id="dyn-s7-roll-split">&euro;{round(rec['price']*8*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-split-yr">&euro;{round(rec['price']*8*0.4*2):,}</span>/{t('年','yr')}<br>
   &middot; <b>{t('每年节省约','Annual savings ~')}<span id="dyn-s7-roll-save">&euro;{round(bs_put(ibex_now,K_90,T_put)*20*0.4*2):,}</span></b>{t('，5年节省约',', 5-year savings ~')}<span id="dyn-s7-roll-save-5yr">&euro;{round(bs_put(ibex_now,K_90,T_put)*20*0.4*2*5):,}</span><br><br>
@@ -1339,6 +1359,8 @@ body.lang-zh .en{{display:none}}
     <li><b>{t('条件Beta高于无条件Beta','Conditional Beta exceeds unconditional Beta')}</b>{t('：全样本Beta='+str(BETA_FUND_IBEX)+'用于计算合约数，但'+str(ncr)+'次历史急跌中实际比率平均'+str(avg_crash_ratio)+'（高'+str(cr_pct_above)+'%）。这意味着16张合约在急跌时只能覆盖约'+str(cov_pct_actual)+'%的IBEX相关损失，实际保护效果比场景表显示的更弱。样本量仅'+str(ncr)+'次，比率波动大（'+f'{min(crash_ratios):.2f}'+'~'+f'{max(crash_ratios):.2f}'+'），结论存在不确定性。',': Full-sample Beta='+str(BETA_FUND_IBEX)+' is used for contract sizing, but in '+str(ncr)+' historical crashes the actual ratio averaged '+str(avg_crash_ratio)+' ('+str(cr_pct_above)+'% higher). This means 16 contracts can only cover ~'+str(cov_pct_actual)+'% of IBEX-related losses during crashes — weaker than scenario tables suggest. Sample size is only '+str(ncr)+', with high ratio volatility ('+f'{min(crash_ratios):.2f}'+'~'+f'{max(crash_ratios):.2f}'+'), so conclusions carry uncertainty.')}</li>
     <li><b>{t('线性模型在极端行情下失真','Linear model breaks down in extreme conditions')}</b>{t('：场景表使用恒定Beta，但极端尾部事件中Beta会漂移，覆盖率可能偏离预期。',': Scenario tables use constant Beta, but in extreme tail events Beta drifts and coverage may deviate from expectations.')}</li>
     <li><b>{t('IV影响成本','IV affects cost')}</b>{t('：恐慌期Put更贵，尽量在平静期滚仓。',': Puts are more expensive during panic periods. Try to roll during calm markets.')}</li>
+    <li><b>{t('MEFF流动性有限','Limited MEFF liquidity')}</b>{t('：Mini IBEX期权的做市商报价spread约€30-60/张（正常时期），恐慌期可能显著扩大。部分行权价只有Ask没有Bid。如需在恐慌期滚仓或卖出，可能承受较大滑点成本。',': Mini IBEX option market maker spreads are ~€30-60/contract (normal conditions), potentially widening significantly during panic. Some strikes have Ask but no Bid. Rolling or selling during panic periods may incur substantial slippage costs.')}</li>
+    <li><b>{t('欧式期权不可提前行权','European options cannot be exercised early')}</b>{t('：Mini IBEX Put为欧式期权，即使在市场暴跌时已深度实值，也无法提前行权——只能在MEFF市场上卖出平仓（价格取决于做市商报价）。在V型反转（暴跌后快速反弹）中，到期时Put可能回到虚值而归零。',': Mini IBEX Puts are European-style — even when deep in-the-money during a crash, they cannot be exercised early. You can only sell to close on the MEFF market (price depends on market maker quotes). In a V-shaped recovery (crash then rapid rebound), the Put may return to OTM and expire worthless.')}</li>
   </ol>
 </div>
 </div>
@@ -1555,7 +1577,7 @@ function buildChain(ibex, K, K90) {{
   var rows = '';
   sorted.forEach(function(s) {{
     var pct = ((s / ibex - 1) * 100).toFixed(1);
-    var price = bsPutAuto(ibex, s, 1.0, P.r);
+    var price = bsPutAuto(ibex, s, P.Tput, P.r);
     var planA = '', planB = '';
     if (s === K) planA = '\u00d78';
     if (s === K90) {{ planA += (planA ? ' + ' : '') + '\u00d720'; planB = '\u00d724'; }}
@@ -1594,7 +1616,7 @@ function buildFullChain(ibex, K, K90) {{
   var hi = Math.round(ibex * 1.05 / 50) * 50;
   for (var s = lo; s <= hi; s += 50) {{
     var pct = ((s / ibex - 1) * 100).toFixed(1);
-    var price = bsPutAuto(ibex, s, 1.0, P.r);
+    var price = bsPutAuto(ibex, s, P.Tput, P.r);
     var hl = (s === K || s === K90) ? ' style="background:#f0fff0;font-weight:600"' : '';
     rows += '<tr' + hl + '><td>' + s.toLocaleString() + '</td><td>' + pct + '%</td><td>\u20AC' + Math.round(price).toLocaleString() + '</td></tr>';
   }}
