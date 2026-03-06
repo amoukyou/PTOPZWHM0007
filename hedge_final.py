@@ -405,6 +405,8 @@ def analyze(fund_df, ibex_df, psi_df, live):
     K_85 = round(ibex_now * 0.85 / 50) * 50
     p_90 = bs_put(ibex_now, K_90, T_put)
     p_85 = bs_put(ibex_now, K_85, T_put)
+    annual_factor = 1.0 / T_put if T_put > 0 else 1.0
+    T_months = round(T_put * 12)
     options = []
     configs = [
         (t('纯ATM ×16','Pure ATM ×16'), t('现方案：全部平值','Current: all ATM'), [(16, K, p1)]),
@@ -419,11 +421,13 @@ def analyze(fund_df, ibex_df, psi_df, live):
             ibex_drop = ibex_now * (1 - drop_pct/100)
             put_payoff = sum(max(k - ibex_drop, 0) * n for n, k, p in legs)
             scenarios[drop_pct] = dict(payoff=round(put_payoff))
-        options.append(dict(label=label, desc=desc, legs=legs, prem=prem,
-                            annual_pct=round(prem/fv*100, 2), five_yr=prem*5, scenarios=scenarios))
+        prem_annual = round(prem * annual_factor)
+        options.append(dict(label=label, desc=desc, legs=legs, prem=prem, prem_annual=prem_annual,
+                            annual_pct=round(prem_annual/fv*100, 2), five_yr=prem_annual*5, scenarios=scenarios))
     # PSI20 scenario table for section 六 — Plan A: recommended mixed config
     rec_legs = configs[1][2]  # ATM×8 + 90%OTM×20
-    rec_prem = round(sum(p * n for n, k, p in rec_legs))
+    rec_prem_raw = round(sum(p * n for n, k, p in rec_legs))  # 单轮保费（T_put期间）
+    rec_prem = round(rec_prem_raw * annual_factor)  # 年化保费
     psi_scenarios = []
     for psi_target in [8500, 8000, 7500, 7000, 6000]:
         psi_drop_pct = (psi_target - psi_now) / psi_now  # negative
@@ -431,14 +435,15 @@ def analyze(fund_df, ibex_df, psi_df, live):
         fund_est = fv * (1 + BETA_FUND_PSI * psi_drop_pct)
         fund_loss = fv - fund_est
         put_pay = sum(max(k - ibex_est, 0) * n for n, k, p in rec_legs)
-        net = fund_est + put_pay - rec_prem
+        net = fund_est + put_pay - rec_prem_raw
         psi_scenarios.append(dict(
             psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
             put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
             cov=round(put_pay/fund_loss*100) if fund_loss > 0 else 0))
     # Plan B: pure 90%OTM×24
     planb_legs = configs[3][2]  # 纯90%OTM ×24
-    planb_prem = round(sum(p * n for n, k, p in planb_legs))
+    planb_prem_raw = round(sum(p * n for n, k, p in planb_legs))  # 单轮保费
+    planb_prem = round(planb_prem_raw * annual_factor)  # 年化保费
     psi_scenarios_b = []
     for psi_target in [8500, 8000, 7500, 7000, 6000]:
         psi_drop_pct = (psi_target - psi_now) / psi_now
@@ -446,7 +451,7 @@ def analyze(fund_df, ibex_df, psi_df, live):
         fund_est = fv * (1 + BETA_FUND_PSI * psi_drop_pct)
         fund_loss = fv - fund_est
         put_pay = sum(max(k - ibex_est, 0) * n for n, k, p in planb_legs)
-        net = fund_est + put_pay - planb_prem
+        net = fund_est + put_pay - planb_prem_raw
         psi_scenarios_b.append(dict(
             psi=psi_target, fund_est=round(fund_est), fund_loss=round(fund_loss),
             put_pay=round(put_pay), net=round(net), ibex_est=round(ibex_est),
@@ -459,10 +464,10 @@ def analyze(fund_df, ibex_df, psi_df, live):
     gain_now = fv - INITIAL_INV  # 当前浮盈
     # Plan A payoff
     pa_pay = sum(max(k - ibex_entry_est, 0) * n for n, k, p in rec_legs)
-    pa_net = fund_entry_est + pa_pay - rec_prem
+    pa_net = fund_entry_est + pa_pay - rec_prem_raw
     # Plan B payoff
     pb_pay = sum(max(k - ibex_entry_est, 0) * n for n, k, p in planb_legs)
-    pb_net = fund_entry_est + pb_pay - planb_prem
+    pb_net = fund_entry_est + pb_pay - planb_prem_raw
     entry_scenario = dict(
         psi_target=PSI20_ENTRY_ACT, psi_drop_pct=round(psi_drop_entry*100, 1),
         ibex_est=round(ibex_entry_est), fund_est=round(fund_entry_est),
@@ -477,6 +482,8 @@ def analyze(fund_df, ibex_df, psi_df, live):
                 options=options, psi_scenarios=psi_scenarios,
                 psi_scenarios_b=psi_scenarios_b,
                 K_90=K_90, rec_prem=rec_prem, planb_prem=planb_prem,
+                rec_prem_raw=rec_prem_raw, planb_prem_raw=planb_prem_raw,
+                T_months=T_months, annual_factor=annual_factor,
                 avg_crash_ratio=avg_crash_ratio, crash_ratios=crash_ratios,
                 entry_scenario=entry_scenario)
 
@@ -569,6 +576,7 @@ def chart_payoff(rec, live):
     """损益图：x轴=PSI20点位, y轴=基金市值(EUR), 显示混合配置"""
     fv, psi_now, ibex_now = live['fund_value'], live['psi'], live['ibex']
     T_put = live.get('best_put_T', 1.0)
+    T_months = round(T_put * 12)
     K_atm = rec['K']
     K_90 = round(ibex_now * 0.90 / 50) * 50
     p1 = bs_put(ibex_now, K_atm, T_put)
@@ -590,10 +598,10 @@ def chart_payoff(rec, live):
     fig.add_trace(go.Scatter(x=psi_x, y=fund_val, name='不对冲',
         line=dict(color='#c62828',width=2.5,dash='dot'),
         hovertemplate='PSI20:%{x:,.0f}<br>基金:€%{y:,.0f}<extra></extra>'))
-    fig.add_trace(go.Scatter(x=psi_x, y=atm_hedged, name=f'纯ATM×16 (€{atm_prem:,}/年)',
+    fig.add_trace(go.Scatter(x=psi_x, y=atm_hedged, name=f'纯ATM×16 (€{atm_prem:,}/{T_months}mo)',
         line=dict(color='#888',width=2,dash='dash'),
         hovertemplate='PSI20:%{x:,.0f}<br>纯ATM:€%{y:,.0f}<extra></extra>'))
-    fig.add_trace(go.Scatter(x=psi_x, y=mix_hedged, name=f'ATM×8+OTM×20 [推荐] (€{mix_prem:,}/年)',
+    fig.add_trace(go.Scatter(x=psi_x, y=mix_hedged, name=f'ATM×8+OTM×20 [推荐] (€{mix_prem:,}/{T_months}mo)',
         line=dict(color='#2e7d32',width=3),
         hovertemplate='PSI20:%{x:,.0f}<br>混合:€%{y:,.0f}<extra></extra>'))
     fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
@@ -626,7 +634,8 @@ def chart_payoff_planb(rec, live):
     fig.add_trace(go.Scatter(x=psi_x, y=fund_val, name='不对冲',
         line=dict(color='#c62828',width=2.5,dash='dot'),
         hovertemplate='PSI20:%{x:,.0f}<br>基金:€%{y:,.0f}<extra></extra>'))
-    fig.add_trace(go.Scatter(x=psi_x, y=otm_hedged, name=f'纯OTM×24 (€{otm_prem:,}/年)',
+    T_months = round(T_put * 12)
+    fig.add_trace(go.Scatter(x=psi_x, y=otm_hedged, name=f'纯OTM×24 (€{otm_prem:,}/{T_months}mo)',
         line=dict(color='#e65100',width=3),
         hovertemplate='PSI20:%{x:,.0f}<br>OTM:€%{y:,.0f}<extra></extra>'))
     fig.add_hline(y=fv, line_dash='dot', line_color='gray', opacity=0.3,
@@ -762,8 +771,12 @@ def generate_html(fund_df, psi_df, res, live):
     psi_scenarios = res['psi_scenarios']
     psi_scenarios_b = res['psi_scenarios_b']
     K_90 = res['K_90']
-    rec_prem = res['rec_prem']
-    planb_prem = res['planb_prem']
+    rec_prem = res['rec_prem']  # 年化保费
+    planb_prem = res['planb_prem']  # 年化保费
+    rec_prem_raw = res['rec_prem_raw']  # 单轮保费（T_put期间）
+    planb_prem_raw = res['planb_prem_raw']
+    T_months = res['T_months']
+    annual_factor = res['annual_factor']
     avg_crash_ratio = res['avg_crash_ratio']
     crash_ratios = res['crash_ratios']
     es = res['entry_scenario']
@@ -872,7 +885,7 @@ def generate_html(fund_df, psi_df, res, live):
         s5, s10, s20, s30 = opt['scenarios'][5], opt['scenarios'][10], opt['scenarios'][20], opt['scenarios'][30]
         opt_rows += f'''<tr{st}>
           <td style="text-align:left">{opt['label']}{tag}<br><span style="font-size:10px;color:#888">{opt['desc']}</span></td>
-          <td>&euro;{opt['prem']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/{t('年','yr')}</span></td>
+          <td>&euro;{opt['prem_annual']:,}<br><span style="font-size:10px;color:#888">{opt['annual_pct']:.2f}%/{t('年','yr')}</span></td>
           <td>&euro;{opt['five_yr']:,}<br><span style="font-size:10px;color:#888">{opt['five_yr']/fv*100:.1f}%</span></td>
           <td style="color:{'#2e7d32' if s5['payoff']>0 else '#ccc'}">&euro;{s5['payoff']:,}</td>
           <td style="color:#2e7d32;font-weight:600">&euro;{s10['payoff']:,}</td>
@@ -1176,8 +1189,9 @@ body.lang-zh .en{{display:none}}
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv"><span id="dyn-pa-prem">&euro;{rec_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span></div>{f'<div style="font-size:11px;color:#c62828;margin-top:4px">MEFF Ask: ATM €{_real_atm_ask:,.0f}×8 + OTM €{_real_otm_ask:,.0f}×20 = <b>€{round(_real_atm_ask*8+_real_otm_ask*20):,}</b></div>' if _real_atm_ask and _real_otm_ask else ''}</div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t(f'本轮保费（{T_months}个月）',f'This Round ({T_months}mo)')}</div><div class="rv"><span id="dyn-pa-prem-raw">&euro;{rec_prem_raw:,}</span></div><div style="font-size:10px;color:#888">BS T={T_put:.2f}yr{f', MEFF Ask <b style="color:#c62828">€{round(_real_atm_ask*8+_real_otm_ask*20):,}</b>' if _real_atm_ask and _real_otm_ask else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv"><span id="dyn-pa-prem">&euro;{rec_prem:,}</span></div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span>{f' | MEFF <b style="color:#c62828">€{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor):,}</b>/yr' if _real_atm_ask and _real_otm_ask else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
   </div>
 </div>
@@ -1204,7 +1218,7 @@ body.lang-zh .en{{display:none}}
   <b style="color:#2e7d32">{t('方案A对冲后：','Plan A Hedged:')}</b><br>
   <span style="display:inline-block;width:16px"></span>{t('基金市值','Fund value')} <b>&euro;{es['fund_est']:,}</b><br>
   <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32"><span id="dyn-es-pa-pay">+&euro;{es['pa_pay']:,}</span></b><br>
-  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828"><span id="dyn-es-pa-prem">&minus;&euro;{rec_prem:,}</span></b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; {t(f'本轮保费（{T_months}个月）',f'Premium ({T_months}mo round)')} <b style="color:#c62828"><span id="dyn-es-pa-prem">&minus;&euro;{rec_prem_raw:,}</span></b><br>
   <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#2e7d32;font-size:17px"><span id="dyn-es-pa-net">&euro;{es['pa_net']:,}</span></b>
   <span style="font-size:13px;color:#888">(vs {t('买入成本','entry cost')}&euro;{INITIAL_INV:,})</span><br>
   <span style="display:inline-block;width:16px"></span><b style="color:#2e7d32">{t('浮盈保住','Unrealized gain retained')}<span id="dyn-es-pa-kept">{es['pa_kept']}%</span></b>
@@ -1218,11 +1232,12 @@ body.lang-zh .en{{display:none}}
 <div class="section">
 <h2>{t('六、推荐方案 B：纯OTM省钱版','Section 6: Recommended Plan B — Pure OTM Budget')}</h2>
 <div class="rec" style="border-color:#e65100;background:#fff3e0">
-  <h3 style="color:#e65100">{t('纯90%OTM Put &times;24，12个月年滚 + 动态滚仓','Pure 90%OTM Put &times;24, 12-Month Annual Roll + Dynamic Rolling')}</h3>
+  <h3 style="color:#e65100">{t(f'纯90%OTM Put &times;24，{T_months}个月滚仓 + 动态滚仓',f'Pure 90%OTM Put &times;24, {T_months}-Month Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem">&euro;{planb_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span></div>{f'<div style="font-size:11px;color:#c62828;margin-top:4px">MEFF Ask: €{_real_otm_ask:,.0f}×24 = <b>€{round(_real_otm_ask*24):,}</b></div>' if _real_otm_ask else ''}</div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*5):,}</div>' if _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t(f'本轮保费（{T_months}个月）',f'This Round ({T_months}mo)')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem-raw">&euro;{planb_prem_raw:,}</span></div><div style="font-size:10px;color:#888">BS T={T_put:.2f}yr{f', MEFF Ask <b style="color:#c62828">€{round(_real_otm_ask*24):,}</b>' if _real_otm_ask else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem">&euro;{planb_prem:,}</span></div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span>{f' | MEFF <b style="color:#c62828">€{round(_real_otm_ask*24*annual_factor):,}</b>/yr' if _real_otm_ask else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*annual_factor*5):,}</div>' if _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-save">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</span></div></div>
     <div class="rec-item"><div class="rl">{t('代价','Trade-off')}</div><div class="rv" style="color:#c62828;font-size:16px">{t('10%以内跌幅不赔','No payout for drops under 10%')}</div></div>
   </div>
@@ -1251,7 +1266,7 @@ body.lang-zh .en{{display:none}}
   <b style="color:#e65100">{t('方案B对冲后：','Plan B Hedged:')}</b><br>
   <span style="display:inline-block;width:16px"></span>{t('基金市值','Fund value')} <b>&euro;{es['fund_est']:,}</b><br>
   <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32"><span id="dyn-es-pb-pay">+&euro;{es['pb_pay']:,}</span></b><br>
-  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828"><span id="dyn-es-pb-prem">&minus;&euro;{planb_prem:,}</span></b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; {t(f'本轮保费（{T_months}个月）',f'Premium ({T_months}mo round)')} <b style="color:#c62828"><span id="dyn-es-pb-prem">&minus;&euro;{planb_prem_raw:,}</span></b><br>
   <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#e65100;font-size:17px"><span id="dyn-es-pb-net">&euro;{es['pb_net']:,}</span></b>
   <span style="font-size:13px;color:#888">(vs {t('买入成本','entry cost')}&euro;{INITIAL_INV:,})</span><br>
   <span style="display:inline-block;width:16px"></span><b style="color:#e65100">{t('浮盈保住','Unrealized gain retained')}<span id="dyn-es-pb-kept">{es['pb_kept']}%</span></b>
@@ -1431,7 +1446,7 @@ var P = {{
   fv: {fv}, ibex0: {ibex_now}, psi: {psi_now},
   betaFI: {BETA_FUND_IBEX}, betaFP: {BETA_FUND_PSI}, betaIP: {BETA_IBEX_PSI},
   iv: {IBEX_IMPLIED_VOL}, r: {ECB_RATE}, initInv: {INITIAL_INV}, psiEntry: {PSI20_ENTRY_ACT},
-  avgCR: {avg_crash_ratio}, fundNav: {fund_nav}, fundUnits: {FUND_UNITS},
+  avgCR: {avg_crash_ratio}, fundNav: {fund_nav}, fundUnits: {FUND_UNITS}, Tput: {T_put},
   meffPts: {str([dict(strike=p['strike'], iv=p['iv']) for p in _meff_iv_points]) if _meff_iv_points else '[]'}
 }};
 function interpIv(K) {{
@@ -1587,7 +1602,7 @@ function buildFullChain(ibex, K, K90) {{
 }}
 
 // ═══ Update config comparison table ═══
-function updateConfigTable(ibex, K, K90, pAtm, pOtm) {{
+function updateConfigTable(ibex, K, K90, pAtm, pOtm, annFactor) {{
   var body = document.getElementById('config-tbody');
   if (!body) return;
   var isEn = document.body.classList.contains('lang-en');
@@ -1599,9 +1614,10 @@ function updateConfigTable(ibex, K, K90, pAtm, pOtm) {{
   ];
   var rows = '';
   configs.forEach(function(c) {{
-    var prem = 0;
-    c.legs.forEach(function(l) {{ prem += l.p * l.n; }});
-    prem = Math.round(prem);
+    var premRaw = 0;
+    c.legs.forEach(function(l) {{ premRaw += l.p * l.n; }});
+    premRaw = Math.round(premRaw);
+    var prem = Math.round(premRaw * annFactor);
     var st = c.rec ? ' style="background:#f0fff0;font-weight:600"' : '';
     var tag = c.rec ? ' <span style="color:#2e7d32;font-size:11px">[' + (isEn?'Rec.':'Rec.') + ']</span>' : '';
     rows += '<tr' + st + '>';
@@ -1756,11 +1772,14 @@ function recalcAll() {{
 
   var K = Math.round(ibex / 50) * 50;
   var K90 = Math.round(ibex * 0.9 / 50) * 50;
-  var pAtm = bsPutAuto(ibex, K, 1.0, P.r);
-  var pOtm = bsPutAuto(ibex, K90, 1.0, P.r);
+  var pAtm = bsPutAuto(ibex, K, P.Tput, P.r);
+  var pOtm = bsPutAuto(ibex, K90, P.Tput, P.r);
 
-  var premA = Math.round(pAtm * 8 + pOtm * 20);
-  var premB = Math.round(pOtm * 24);
+  var premARaw = Math.round(pAtm * 8 + pOtm * 20);  // 单轮保费
+  var premBRaw = Math.round(pOtm * 24);
+  var annFactor = P.Tput > 0 ? 1.0 / P.Tput : 1.0;
+  var premA = Math.round(premARaw * annFactor);  // 年化保费
+  var premB = Math.round(premBRaw * annFactor);
 
   // Update option chain
   buildChain(ibex, K, K90);
@@ -1768,33 +1787,35 @@ function recalcAll() {{
   // Update Plan A rec box
   setText('dyn-pa-atm-k', K.toLocaleString());
   setText('dyn-pa-otm-k', K90.toLocaleString());
+  setText('dyn-pa-prem-raw', '\u20AC' + premARaw.toLocaleString());
   setText('dyn-pa-prem', '\u20AC' + premA.toLocaleString());
   setText('dyn-pa-prem-pct', (premA/P.fv*100).toFixed(2) + '%');
   setText('dyn-pa-5yr', '\u20AC' + (premA*5).toLocaleString());
 
   // Update Plan B rec box
   setText('dyn-pb-otm-k', K90.toLocaleString());
+  setText('dyn-pb-prem-raw', '\u20AC' + premBRaw.toLocaleString());
   setText('dyn-pb-prem', '\u20AC' + premB.toLocaleString());
   setText('dyn-pb-prem-pct', (premB/P.fv*100).toFixed(2) + '%');
   setText('dyn-pb-5yr', '\u20AC' + (premB*5).toLocaleString());
   setText('dyn-pb-save', Math.round((1-premB/premA)*100) + '%');
 
   // Update config comparison table
-  updateConfigTable(ibex, K, K90, pAtm, pOtm);
+  updateConfigTable(ibex, K, K90, pAtm, pOtm, annFactor);
 
-  // Update PSI scenario tables
-  updatePsiTable('psi-tbody-a', ibex, [{{n:8,k:K}}, {{n:20,k:K90}}], premA);
-  updatePsiTable('psi-tbody-b', ibex, [{{n:24,k:K90}}], premB);
+  // Update PSI scenario tables (use raw premium — single round cost)
+  updatePsiTable('psi-tbody-a', ibex, [{{n:8,k:K}}, {{n:20,k:K90}}], premARaw);
+  updatePsiTable('psi-tbody-b', ibex, [{{n:24,k:K90}}], premBRaw);
 
-  // Update entry scenario
-  updateEntryScenario(ibex, K, K90, pAtm, pOtm, premA, premB);
+  // Update entry scenario (use raw premium — single round cost)
+  updateEntryScenario(ibex, K, K90, pAtm, pOtm, premARaw, premBRaw);
 
-  // Update section 7 prices
+  // Update section 7 prices (use annualized for annual cost display)
   updateStepPrices(ibex, K, K90, pAtm, pOtm, premA, premB);
 
-  // Update payoff charts
-  updatePayoffChart('c5', ibex, K, K90, [{{n:8,k:K}},{{n:20,k:K90}}], premA);
-  updatePayoffChart('c5b', ibex, K, K90, [{{n:24,k:K90}}], premB);
+  // Update payoff charts (use raw premium — single round cost)
+  updatePayoffChart('c5', ibex, K, K90, [{{n:8,k:K}},{{n:20,k:K90}}], premARaw);
+  updatePayoffChart('c5b', ibex, K, K90, [{{n:24,k:K90}}], premBRaw);
 }}
 
 // Build initial option chain on page load
