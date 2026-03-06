@@ -670,14 +670,17 @@ body.lang-zh .en{{display:none}}
       IBEX35: {live['ibex_date']} &middot;
       ESTOXX50: {live['estx_date']}
     </span><br>
-    <span style="font-size:11px;color:#aaa">{t('重新运行','Re-run')} <code style="background:#eee;padding:1px 5px;border-radius:3px">python3 hedge_final.py</code> {t('即可刷新全部数据至最新交易日','to refresh all data to the latest trading day')}</span>
+    <span style="font-size:11px;color:#aaa">{t('指数来源：Yahoo Finance，基金NAV来源：','Index source: Yahoo Finance, Fund NAV source: ')}{live['fund_src']}</span>
   </div>
-  <div style="text-align:right;min-width:140px">
+  <div style="text-align:right;min-width:200px;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
     <div style="font-size:11px;color:#888">{t('报告生成于','Report generated at')}</div>
     <div style="font-size:15px;font-weight:800;color:#1a237e">{gen_time}</div>
     <div class="timer" id="timer"></div>
+    <button onclick="fetchAll()" id="refresh-btn" style="margin-top:4px;padding:6px 16px;border:2px solid #1a237e;border-radius:8px;background:#eef2ff;cursor:pointer;font-weight:700;font-size:12px;color:#1a237e">{t('刷新数据','Refresh Data')}</button>
+    <span id="refresh-status" style="font-size:11px"></span>
   </div>
 </div>
+<input type="hidden" id="ibex-input" value="{ibex_now:.0f}">
 
 <div class="section">
 <h2>{t('一、持仓概况','Section 1: Holdings Overview')}</h2>
@@ -685,11 +688,11 @@ body.lang-zh .en{{display:none}}
   <div class="card green"><div class="lbl">{t('买入成本','Entry Cost')}</div><div class="val">&euro;{INITIAL_INV:,}</div><div class="sub">2024.07 NAV &euro;{FUND_ENTRY_PRICE:.2f}</div></div>
   <div class="card green"><div class="lbl">{t('当前市值','Current Value')}</div><div class="val">&euro;{fv:,}</div><div class="sub">NAV &euro;{fund_nav:.2f}</div></div>
   <div class="card purple"><div class="lbl">{t('浮盈','Unrealized Gain')}</div><div class="val">{"+" if fv>=INITIAL_INV else ""}&euro;{fv-INITIAL_INV:,}</div><div class="sub">{fg:+.1f}%</div></div>
-  <div class="card orange"><div class="lbl">PSI20</div><div class="val">{psi_now:,.0f}</div><div class="sub">{t('买入时','At entry')}{PSI20_ENTRY_ACT:,}</div></div>
+  <div class="card orange"><div class="lbl">PSI20</div><div class="val" data-live="psi">{psi_now:,.0f}</div><div class="sub">{t('买入时','At entry')}{PSI20_ENTRY_ACT:,}</div></div>
 </div>
 <div style="display:flex;gap:14px;margin-bottom:12px;font-size:12px;color:#888">
-  <span>IBEX35: <b style="color:#e65100">{ibex_now:,.0f}</b></span>
-  <span>ESTOXX50: <b style="color:#6a1b9a">{estx_now:,.0f}</b></span>
+  <span>IBEX35: <b style="color:#e65100" data-live="ibex">{ibex_now:,.0f}</b></span>
+  <span>ESTOXX50: <b style="color:#6a1b9a" data-live="estx">{estx_now:,.0f}</b></span>
 </div>
 <div class="chart-box"><div id="c1" style="height:340px"></div></div>
 <div class="alert a-warn">
@@ -753,12 +756,40 @@ body.lang-zh .en{{display:none}}
 
 <div class="section">
 <h2>{t('四、合约配置：混合行权价策略','Section 4: Contract Configuration — Mixed Strike Strategy')}</h2>
+
+<div style="margin-bottom:14px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+  <span style="font-size:14px;font-weight:700;color:#1a237e">{t('IBEX35 Put 期权定价参考','IBEX35 Put Pricing Reference')}</span>
+  <span style="font-size:11px;color:#aaa">BS {t('理论价','theoretical')} | IV={IBEX_IMPLIED_VOL*100:.1f}% | r={ECB_RATE*100:.1f}% | T=1yr</span>
+</div>
+<table id="option-chain-table" style="font-size:13px">
+  <tr>
+    <th>{t('行权价','Strike')}</th>
+    <th>{t('距现价','vs Spot')}</th>
+    <th>{t('BS价格/张','BS Price/Ct')}</th>
+    <th>{t('方案A','Plan A')}</th>
+    <th>{t('方案B','Plan B')}</th>
+  </tr>
+  <tbody id="chain-body"></tbody>
+</table>
+<div style="font-size:11px;color:#aaa;margin-top:4px">
+  {t('实际OTM价格因IV skew可能高30-50%，以IBKR/MEFF实盘报价为准。','Actual OTM prices may be 30-50% higher due to IV skew. Use IBKR/MEFF live quotes.')}
+  <a href="javascript:void(0)" onclick="toggleFullChain()" id="chain-toggle" style="color:#1a237e;font-weight:600">{t('展开完整链','Show full chain')}</a>
+</div>
+<div id="full-chain-box" style="display:none;margin-top:8px">
+<table style="font-size:12px">
+  <tr><th>{t('行权价','Strike')}</th><th>{t('距现价','vs Spot')}</th><th>{t('BS价格','BS Price')}</th></tr>
+  <tbody id="full-chain-body"></tbody>
+</table>
+</div>
+</div>
+
 <div class="alert a-info">
   <b>{t('核心思路','Core Idea')}</b>{t('：不必全买贵的ATM Put。用一部分预算买便宜的虚值OTM Put，张数更多，大跌时赔付反而更高——同样的保费，换来更强的崩盘保护。',': No need to buy all expensive ATM Puts. Use part of the budget for cheaper OTM Puts — more contracts, higher payout in large crashes. Same premium, stronger crash protection.')}
 </div>
 <table>
   <tr><th style="text-align:left">{t('配置','Config')}</th><th>{t('年保费','Annual Premium')}</th><th>{t('5年总保费','5-Year Total')}</th><th>{t('IBEX跌5%','IBEX -5%')}</th><th>{t('IBEX跌10%','IBEX -10%')}</th><th>{t('IBEX跌20%','IBEX -20%')}</th><th>{t('IBEX跌30%','IBEX -30%')}</th></tr>
-  {opt_rows}
+  <tbody id="config-tbody">{opt_rows}</tbody>
 </table>
 <div class="alert a-warn" style="font-size:13px">
   <b>{t('怎么读这张表','How to Read This Table')}</b>{t('：','：')}<br>
@@ -790,10 +821,10 @@ body.lang-zh .en{{display:none}}
 <div class="rec">
   <h3>ATM Put &times;8 + 90%OTM Put &times;20{t('，12个月年滚 + 动态滚仓',', 12-Month Annual Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv">{rec['K']:,}{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
-    <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv">{K_90:,}{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv">&euro;{rec_prem:,}</div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, {rec_prem/fv*100:.2f}%</div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv">&euro;{rec_prem*5:,}</div></div>
+    <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
+    <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
+    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv"><span id="dyn-pa-prem">&euro;{rec_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span></div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div></div>
     <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
   </div>
 </div>
@@ -804,7 +835,7 @@ body.lang-zh .en{{display:none}}
 <p style="margin:16px 0 8px;font-weight:700">{t('如果PSI20跌到…你的基金会怎样？','What happens to your fund if PSI20 drops to…?')}</p>
 <table>
   <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}</th></tr>
-  {psi_rows}
+  <tbody id="psi-tbody-a">{psi_rows}</tbody>
 </table>
 <div class="alert a-warn" style="font-size:13px">
   <b>{t('线性模型局限','Linear Model Limitation')}</b>{t('：上表覆盖率随跌幅递增——小跌时8张ATM独扛（覆盖率低），大跌时20张OTM逐步启动、赔付加速上升（覆盖率可达50%以上）。这正是混合行权价策略的优势。',': Coverage in the table above increases with drop size — in small drops only 8 ATM contracts carry the load (low coverage), while in large drops the 20 OTM contracts progressively activate with accelerating payout (coverage can exceed 50%). This is the advantage of a mixed-strike strategy.')}<br>
@@ -815,16 +846,16 @@ body.lang-zh .en{{display:none}}
 
 <div class="alert a-good" style="font-size:14px;line-height:1.9;border:2px solid #388e3c">
   <b style="font-size:16px">{t('如果PSI20跌回买入时的'+f'{es["psi_target"]:,}'+'点？（方案A）','What if PSI20 drops back to entry level '+f'{es["psi_target"]:,}'+' pts? (Plan A)')}</b><br>
-  <span style="font-size:13px;color:#888">{t('PSI20从当前跌'+str(es['psi_drop_pct'])+'%，IBEX估计跌到'+f'{es["ibex_est"]:,}'+'点（Beta换算，非等比回落）','PSI20 drops '+str(es['psi_drop_pct'])+'% from current, IBEX est. drops to '+f'{es["ibex_est"]:,}'+' pts (Beta conversion, not proportional)')}</span><br><br>
-  <b>{t('不对冲：','Unhedged:')}</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>{t('，亏损',', loss')}&euro;{es['fund_loss']:,}{t('，浮盈保住',', unrealized gain retained')}<b>{es['no_hedge_kept']}%</b><br><br>
+  <span style="font-size:13px;color:#888">{t('PSI20从当前跌'+str(es['psi_drop_pct'])+'%，IBEX估计跌到','PSI20 drops '+str(es['psi_drop_pct'])+'% from current, IBEX est. drops to ')}<span id="dyn-es-ibex">{es["ibex_est"]:,}</span>{t('点（Beta换算，非等比回落）',' pts (Beta conversion, not proportional)')}</span><br><br>
+  <b>{t('不对冲：','Unhedged:')}</b>&euro;{fv:,} &rarr; <b><span id="dyn-es-fund">&euro;{es['fund_est']:,}</span></b>{t('，亏损',', loss')}<span id="dyn-es-loss">&euro;{es['fund_loss']:,}</span>{t('，浮盈保住',', unrealized gain retained')}<b><span id="dyn-es-nohedge">{es['no_hedge_kept']}%</span></b><br><br>
   <b style="color:#2e7d32">{t('方案A对冲后：','Plan A Hedged:')}</b><br>
   <span style="display:inline-block;width:16px"></span>{t('基金市值','Fund value')} <b>&euro;{es['fund_est']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32">+&euro;{es['pa_pay']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828">&minus;&euro;{rec_prem:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#2e7d32;font-size:17px">&euro;{es['pa_net']:,}</b>
+  <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32"><span id="dyn-es-pa-pay">+&euro;{es['pa_pay']:,}</span></b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828"><span id="dyn-es-pa-prem">&minus;&euro;{rec_prem:,}</span></b><br>
+  <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#2e7d32;font-size:17px"><span id="dyn-es-pa-net">&euro;{es['pa_net']:,}</span></b>
   <span style="font-size:13px;color:#888">(vs {t('买入成本','entry cost')}&euro;{INITIAL_INV:,})</span><br>
-  <span style="display:inline-block;width:16px"></span><b style="color:#2e7d32">{t('浮盈保住','Unrealized gain retained')}{es['pa_kept']}%</b>
-  <span style="font-size:13px;color:#888">({t('当前浮盈','current gain')}&euro;{es['gain_now']:,}{t('，对冲后仍盈利',', still profitable after hedge')}&euro;{es['pa_net']-INITIAL_INV:,})</span>
+  <span style="display:inline-block;width:16px"></span><b style="color:#2e7d32">{t('浮盈保住','Unrealized gain retained')}<span id="dyn-es-pa-kept">{es['pa_kept']}%</span></b>
+  <span style="font-size:13px;color:#888">({t('当前浮盈','current gain')}&euro;{es['gain_now']:,}{t('，对冲后仍盈利',', still profitable after hedge')}<span id="dyn-es-pa-gain">&euro;{es['pa_net']-INITIAL_INV:,}</span>)</span>
 </div>
 </div>
 </div>
@@ -836,10 +867,10 @@ body.lang-zh .en{{display:none}}
 <div class="rec" style="border-color:#e65100;background:#fff3e0">
   <h3 style="color:#e65100">{t('纯90%OTM Put &times;24，12个月年滚 + 动态滚仓','Pure 90%OTM Put &times;24, 12-Month Annual Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
-    <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100">{K_90:,}{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv" style="color:#e65100">&euro;{planb_prem:,}</div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, {planb_prem/fv*100:.2f}%</div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100">&euro;{planb_prem*5:,}</div></div>
-    <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</div></div>
+    <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
+    <div class="rec-item"><div class="rl">{t('每年保费','Annual Premium')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-prem">&euro;{planb_prem:,}</span></div><div style="font-size:10px;color:#888">{t('BS理论值','BS theoretical')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span></div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div></div>
+    <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-save">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</span></div></div>
     <div class="rec-item"><div class="rl">{t('代价','Trade-off')}</div><div class="rv" style="color:#c62828;font-size:16px">{t('10%以内跌幅不赔','No payout for drops under 10%')}</div></div>
   </div>
 </div>
@@ -853,7 +884,7 @@ body.lang-zh .en{{display:none}}
 <p style="margin:16px 0 8px;font-weight:700">{t('如果PSI20跌到…你的基金会怎样？（方案B）','What happens to your fund if PSI20 drops to…? (Plan B)')}</p>
 <table>
   <tr><th>{t('PSI20跌到','PSI20 Drops To')}</th><th>{t('基金预估市值','Est. Fund Value')}</th><th>{t('预估亏损','Est. Loss')}</th><th>{t('Put赔付','Put Payout')}</th><th>{t('对冲后市值','Hedged Value')}</th><th>{t('覆盖率','Coverage')}</th></tr>
-  {psi_rows_b}
+  <tbody id="psi-tbody-b">{psi_rows_b}</tbody>
 </table>
 <div class="alert a-info" style="font-size:13px">
   {t('注意：当PSI20只跌5-8%时，IBEX估计跌幅不足10%，OTM Put尚未进入实值区，赔付为零。只有PSI20跌到较低水平（约7500以下），Put才开始大额赔付。','Note: When PSI20 only drops 5-8%, IBEX estimated drop is under 10%, OTM Puts remain out of the money with zero payout. Only when PSI20 drops to lower levels (below ~7500) do the Puts begin significant payouts.')}
@@ -866,13 +897,13 @@ body.lang-zh .en{{display:none}}
   <b>{t('不对冲：','Unhedged:')}</b>&euro;{fv:,} &rarr; <b>&euro;{es['fund_est']:,}</b>{t('，亏损',', loss')}&euro;{es['fund_loss']:,}{t('，浮盈保住',', unrealized gain retained')}<b>{es['no_hedge_kept']}%</b><br><br>
   <b style="color:#e65100">{t('方案B对冲后：','Plan B Hedged:')}</b><br>
   <span style="display:inline-block;width:16px"></span>{t('基金市值','Fund value')} <b>&euro;{es['fund_est']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32">+&euro;{es['pb_pay']:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828">&minus;&euro;{planb_prem:,}</b><br>
-  <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#e65100;font-size:17px">&euro;{es['pb_net']:,}</b>
+  <span style="display:inline-block;width:16px"></span>+ {t('Put赔付','Put Payout')} <b style="color:#2e7d32"><span id="dyn-es-pb-pay">+&euro;{es['pb_pay']:,}</span></b><br>
+  <span style="display:inline-block;width:16px"></span>&minus; {t('年保费','Annual Premium')} <b style="color:#c62828"><span id="dyn-es-pb-prem">&minus;&euro;{planb_prem:,}</span></b><br>
+  <span style="display:inline-block;width:16px"></span>= {t('组合净值','Portfolio Net Value')} <b style="color:#e65100;font-size:17px"><span id="dyn-es-pb-net">&euro;{es['pb_net']:,}</span></b>
   <span style="font-size:13px;color:#888">(vs {t('买入成本','entry cost')}&euro;{INITIAL_INV:,})</span><br>
-  <span style="display:inline-block;width:16px"></span><b style="color:#e65100">{t('浮盈保住','Unrealized gain retained')}{es['pb_kept']}%</b>
-  <span style="font-size:13px;color:#888">({t('当前浮盈','current gain')}&euro;{es['gain_now']:,}{t('，对冲后仍盈利',', still profitable after hedge')}&euro;{es['pb_net']-INITIAL_INV:,})</span><br><br>
-  <span style="font-size:13px;color:#888">{t('对比方案A：保住浮盈'+str(es['pa_kept'])+'%，多保'+str(es['pa_kept']-es['pb_kept'])+'个百分点，但每年多花&euro;'+f'{rec_prem-planb_prem:,}'+'保费。','Compared to Plan A: retains '+str(es['pa_kept'])+'% of gains, '+str(es['pa_kept']-es['pb_kept'])+' percentage points more, but costs &euro;'+f'{rec_prem-planb_prem:,}'+' more per year.')}</span>
+  <span style="display:inline-block;width:16px"></span><b style="color:#e65100">{t('浮盈保住','Unrealized gain retained')}<span id="dyn-es-pb-kept">{es['pb_kept']}%</span></b>
+  <span style="font-size:13px;color:#888">({t('当前浮盈','current gain')}&euro;{es['gain_now']:,}{t('，对冲后仍盈利',', still profitable after hedge')}<span id="dyn-es-pb-gain">&euro;{es['pb_net']-INITIAL_INV:,}</span>)</span><br><br>
+  <span style="font-size:13px;color:#888">{t('对比方案A：保住浮盈','Compared to Plan A: retains ')}<span id="dyn-es-pa-kept2">{es['pa_kept']}</span>{t('%，多保','% of gains, ')}<span id="dyn-es-pa-diff">{es['pa_kept']-es['pb_kept']}</span>{t('个百分点，但每年多花',' percentage points more, but costs ')}<span id="dyn-es-prem-diff">&euro;{rec_prem-planb_prem:,}</span>{t('保费。',' more per year.')}</span>
 </div>
 </div>
 </div>
@@ -883,20 +914,20 @@ body.lang-zh .en{{display:none}}
 <h2>{t('七、操作步骤（方案A）','Section 7: Operating Steps (Plan A)')}</h2>
 <div class="steps"><ol>
   <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
-  <li><b>{t('买第一腿——ATM Put &times;8','Buy Leg 1 — ATM Put &times;8')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b>{rec['K']:,}</b>{t('（ATM，50点间距）。参考价约',' (ATM, 50-pt intervals). Ref. price ~')}&euro;{rec['price']:,.0f}/{t('张','contract')}{t('，8张合计约',', 8 contracts total ~')}&euro;{round(rec['price']*8):,}。</li>
-  <li><b>{t('买第二腿——90%OTM Put &times;20','Buy Leg 2 — 90%OTM Put &times;20')}</b>{t('：同到期月，行权价',': Same expiry month, strike')}<b>{K_90:,}</b> (90% OTM){t('。参考价约','. Ref. price ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/{t('张','contract')}{t('，20张合计约',', 20 contracts total ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}。</li>
-  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}&euro;{rec_prem:,} (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
+  <li><b>{t('买第一腿——ATM Put &times;8','Buy Leg 1 — ATM Put &times;8')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-atm-k">{rec['K']:,}</span></b>{t('（ATM，50点间距）。参考价约',' (ATM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-atm-price">&euro;{rec['price']:,.0f}</span>/{t('张','contract')}{t('，8张合计约',', 8 contracts total ~')}<span id="dyn-s7-atm-total">&euro;{round(rec['price']*8):,}</span>。</li>
+  <li><b>{t('买第二腿——90%OTM Put &times;20','Buy Leg 2 — 90%OTM Put &times;20')}</b>{t('：同到期月，行权价',': Same expiry month, strike')}<b><span id="dyn-s7-otm-k">{K_90:,}</span></b> (90% OTM){t('。参考价约','. Ref. price ~')}<span id="dyn-s7-otm-price">&euro;{round(bs_put(ibex_now,K_90,1.0)):,}</span>/{t('张','contract')}{t('，20张合计约',', 20 contracts total ~')}<span id="dyn-s7-otm-total">&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}</span>。</li>
+  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-a">&euro;{rec_prem:,}</span> (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
   <b>{t('实际市价预计上浮10-30%','Actual market price expected 10-30% higher')}</b>{t('，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV='+str(IBEX_IMPLIED_VOL*100)+'%更高，OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。',', especially OTM Puts due to volatility skew (actual IV ~22-25%, higher than the ATM IV='+str(IBEX_IMPLIED_VOL*100)+'% used in this report). OTM actual prices may be 30-50% above BS theoretical values. Always use IBKR/MEFF live quotes before placing orders.')}</li>
   <li><b>{t('分腿动态滚仓','Split-Leg Dynamic Rolling')}</b>{t('（关键！）：ATM腿和OTM腿职责不同，滚仓策略也不同：',' (Critical!): ATM and OTM legs have different roles, so different rolling strategies:')}<br>
-  <b style="color:#1565c0">ATM×8{t('（跟踪腿）',' (Tracking Leg)')}</b>{t('：IBEX涨超10%（>'+f'{round(ibex_now*1.10):,}'+'）时',': When IBEX rises >10% (>'+f'{round(ibex_now*1.10):,}'+')' )}<b>{t('立即滚仓',' roll immediately')}</b>{t('——卖掉旧ATM Put，买入新ATM Put重设行权价。ATM必须紧贴当前市场，否则小跌时赔不了（Event #10教训）。建议每月检查。',' — sell old ATM Put, buy new ATM Put to reset strike. ATM must stay close to current market; otherwise it won&rsquo;t pay in small drops (Event #10 lesson). Check monthly.')}<br>
+  <b style="color:#1565c0">ATM×8{t('（跟踪腿）',' (Tracking Leg)')}</b>{t('：IBEX涨超10%（>','：When IBEX rises >10% (>')}<span id="dyn-s7-trigger-a">{round(ibex_now*1.10):,}</span>{t('）时',')')}<b>{t('立即滚仓',' roll immediately')}</b>{t('——卖掉旧ATM Put，买入新ATM Put重设行权价。ATM必须紧贴当前市场，否则小跌时赔不了（Event #10教训）。建议每月检查。',' — sell old ATM Put, buy new ATM Put to reset strike. ATM must stay close to current market; otherwise it won&rsquo;t pay in small drops (Event #10 lesson). Check monthly.')}<br>
   <b style="color:#e65100">OTM×20{t('（兜底腿）',' (Floor Leg)')}</b>{t('：','：')}<b>{t('不参与动态滚仓','Does NOT participate in dynamic rolling')}</b>{t('，只做年度正常到期滚仓。OTM买来就是防崩盘（-20%~-30%），IBEX涨10%后它从虚值10%变成虚值20%，但真来大崩盘时仍会深度实值，赔付差额有限。',', only annual expiry rolling. OTM is bought purely for crash protection (-20%~-30%). After IBEX rises 10%, it goes from 10% OTM to 20% OTM, but in a real crash it will still be deep ITM with limited payout difference.')}</li>
   <li><b>{t('到期前1个月滚仓','Roll 1 Month Before Expiry')}</b>{t('：ATM和OTM两条腿都正常到期滚仓，卖旧买新，周而复始。',': Both ATM and OTM legs undergo normal expiry rolling — sell old, buy new, repeat.')}</li>
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
   <b>{t('分腿滚仓的成本优势','Cost Advantage of Split-Leg Rolling')}</b>{t('：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。',': Each dynamic trigger only rolls 8 ATM contracts (not all 28), significantly reducing rolling costs.')}<br>
-  &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <b>&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4):,}</b>{t('，每年2次',', 2x/yr')} = &euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4)*2):,}/{t('年','yr')}<br>
-  &middot; <b>{t('分腿滚仓','Split-Leg Rolling')}</b>{t('（推荐）：只滚8张ATM，单次损耗',' (recommended): only roll 8 ATM, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b>&euro;{round(rec['price']*8*0.4):,}</b>{t('，每年2次',', 2x/yr')} = &euro;{round(rec['price']*8*0.4*2):,}/{t('年','yr')}<br>
-  &middot; <b>{t('每年节省约','Annual savings ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2):,}</b>{t('，5年节省约',', 5-year savings ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2*5):,}<br><br>
+  &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <b><span id="dyn-s7-roll-full">&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-full-yr">&euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4)*2):,}</span>/{t('年','yr')}<br>
+  &middot; <b>{t('分腿滚仓','Split-Leg Rolling')}</b>{t('（推荐）：只滚8张ATM，单次损耗',' (recommended): only roll 8 ATM, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b><span id="dyn-s7-roll-split">&euro;{round(rec['price']*8*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-split-yr">&euro;{round(rec['price']*8*0.4*2):,}</span>/{t('年','yr')}<br>
+  &middot; <b>{t('每年节省约','Annual savings ~')}<span id="dyn-s7-roll-save">&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2):,}</span></b>{t('，5年节省约',', 5-year savings ~')}<span id="dyn-s7-roll-save-5yr">&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2*5):,}</span><br><br>
   <b>{t('代价','Trade-off')}</b>{t('：在"连续大涨后崩盘"的极端场景中，未滚仓的OTM行权价较低，赔付会少约',': In the extreme "sustained rally then crash" scenario, unrolled OTM strikes are lower, payout will be ~')}&euro;{round((ibex_now*0.1)*20):,}{t(' 少。但这笔差额与5年节省的滚仓成本大致打平。在更常见的"涨后中小跌"场景中，OTM本来就不赔，分不分开滚没有区别。',' less. But this difference roughly offsets the 5-year rolling cost savings. In the more common "rally then small drop" scenario, OTM wouldn&rsquo;t pay out anyway, so split vs. unified rolling makes no difference.')}
 </div>
 </div>
@@ -908,18 +939,18 @@ body.lang-zh .en{{display:none}}
 <h2>{t('七、操作步骤（方案B）','Section 7: Operating Steps (Plan B)')}</h2>
 <div class="steps"><ol>
   <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
-  <li><b>{t('买90%OTM Put &times;24','Buy 90%OTM Put &times;24')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b>{K_90:,}</b>{t('（90% OTM，50点间距）。参考价约',' (90% OTM, 50-pt intervals). Ref. price ~')}&euro;{round(bs_put(ibex_now,K_90,1.0)):,}/{t('张','contract')}{t('，24张合计约',', 24 contracts total ~')}&euro;{planb_prem:,}。</li>
-  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}&euro;{planb_prem:,} (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
+  <li><b>{t('买90%OTM Put &times;24','Buy 90%OTM Put &times;24')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-otm-k-b">{K_90:,}</span></b>{t('（90% OTM，50点间距）。参考价约',' (90% OTM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-otm-price-b">&euro;{round(bs_put(ibex_now,K_90,1.0)):,}</span>/{t('张','contract')}{t('，24张合计约',', 24 contracts total ~')}<span id="dyn-s7-otm-total-b">&euro;{planb_prem:,}</span>。</li>
+  <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-b">&euro;{planb_prem:,}</span> (Black-Scholes{t('理论值',' theoretical')}, IV={IBEX_IMPLIED_VOL*100:.1f}%, r={ECB_RATE*100:.1f}%){t('。','.')}
   <b>{t('实际市价预计上浮30-50%','Actual market price expected 30-50% higher')}</b>{t('——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV='+str(IBEX_IMPLIED_VOL*100)+'%。实际年成本可能达',' — OTM Puts have higher actual IV (~22-25%) due to volatility skew, well above ATM IV='+str(IBEX_IMPLIED_VOL*100)+'%. Actual annual cost may reach')}&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}{t('。下单前务必以IBKR/MEFF实际报价为准。','. Always use IBKR/MEFF live quotes before placing orders.')}</li>
   <li><b>{t('动态滚仓','Dynamic Rolling')}</b>{t('：方案B全部是OTM Put，与方案A的分腿滚仓逻辑类似——OTM的职责是防崩盘，IBEX涨10%后从虚值10%变成虚值20%，但大崩盘时仍会深度实值。因此方案B',': Plan B is all OTM Puts, similar logic to Plan A&rsquo;s split-leg rolling — OTM&rsquo;s role is crash protection. After IBEX rises 10%, OTM goes from 10% to 20% OTM, but in a real crash it&rsquo;ll still be deep ITM. So Plan B')}<b>{t('以年度正常滚仓为主','primarily uses annual expiry rolling')}</b>{t('，不需要频繁动态触发。',', no frequent dynamic triggers needed.')}<br>
-  {t('但如果IBEX','But if IBEX')}<b>{t('累计涨超20%','rises more than 20% cumulatively')}</b> (&gt;{round(ibex_now*1.20):,}){t('，OTM行权价已严重脱离市场，此时应滚仓重设行权价。建议每月检查。',', OTM strikes are too far from market — roll to reset strikes. Check monthly.')}</li>
+  {t('但如果IBEX','But if IBEX')}<b>{t('累计涨超20%','rises more than 20% cumulatively')}</b> (&gt;<span id="dyn-s7-trigger-b">{round(ibex_now*1.20):,}</span>){t('，OTM行权价已严重脱离市场，此时应滚仓重设行权价。建议每月检查。',', OTM strikes are too far from market — roll to reset strikes. Check monthly.')}</li>
   <li><b>{t('到期前1个月滚仓','Roll 1 Month Before Expiry')}</b>{t('：正常到期前卖旧买新，周而复始。',': Sell old, buy new before expiry, repeat.')}</li>
 </ol></div>
 <div class="alert a-warn" style="font-size:13px">
   <b>{t('方案B注意','Plan B Note')}</b>{t('：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。',': Since all contracts are OTM Puts, there is no payout during small pullbacks. This is intentional — lower cost in exchange for "crash-only" protection. If you find yourself worried about 5-10% pullbacks having no coverage, switch to Plan A.')}<br><br>
   <b>{t('方案B的滚仓成本优势','Plan B Rolling Cost Advantage')}</b>{t('：因为以年度滚仓为主（动态触发阈值为20%，远高于方案A的10%），预计每年额外动态滚仓0-1次，滚仓损耗远低于方案A。',': Since annual rolling is primary (dynamic trigger threshold is 20%, much higher than Plan A&rsquo;s 10%), expect 0-1 extra dynamic rolls per year, far less rolling cost than Plan A.')}
-  {t('即使触发1次：','Even if triggered once: ')}24&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4):,}。
-  {t('方案B真实年化总成本','Plan B true annualized total cost')} &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,} ({t('平均0.5次/年','avg 0.5x/yr')}) = <b>&euro;{planb_prem + round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}</b> ({t('未含skew上浮','excl. skew markup')})。
+  {t('即使触发1次：','Even if triggered once: ')}24&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <span id="dyn-s7-roll-b">&euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4):,}</span>。
+  {t('方案B真实年化总成本','Plan B true annualized total cost')} &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,} ({t('平均0.5次/年','avg 0.5x/yr')}) = <b><span id="dyn-s7-roll-b-total">&euro;{planb_prem + round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}</span></b> ({t('未含skew上浮','excl. skew markup')})。
 </div>
 </div>
 </div>
@@ -1021,6 +1052,372 @@ function toggleLang(){{
     b.classList.remove('lang-en');b.classList.add('lang-zh');btn.textContent='EN';
   }}
 }}
+
+// ═══ BS Put pricing in JS ═══
+function normCdf(x) {{
+  var a1=0.254829592, a2=-0.284496736, a3=1.421413741, a4=-1.453152027, a5=1.061405429, p=0.3275911;
+  var sign = x < 0 ? -1 : 1;
+  x = Math.abs(x) / Math.sqrt(2);
+  var t = 1.0 / (1.0 + p * x);
+  var y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t * Math.exp(-x*x);
+  return 0.5 * (1.0 + sign * y);
+}}
+function bsPut(S, K, T, r, sigma) {{
+  if (T <= 0) return Math.max(K - S, 0);
+  var d1 = (Math.log(S/K) + (r + 0.5*sigma*sigma)*T) / (sigma*Math.sqrt(T));
+  var d2 = d1 - sigma*Math.sqrt(T);
+  return K*Math.exp(-r*T)*normCdf(-d2) - S*normCdf(-d1);
+}}
+
+// ═══ Parameters as JS globals ═══
+var P = {{
+  fv: {fv}, ibex0: {ibex_now}, psi: {psi_now},
+  betaFI: {BETA_FUND_IBEX}, betaFP: {BETA_FUND_PSI}, betaIP: {BETA_IBEX_PSI},
+  iv: {IBEX_IMPLIED_VOL}, r: {ECB_RATE}, initInv: {INITIAL_INV}, psiEntry: {PSI20_ENTRY_ACT},
+  avgCR: {avg_crash_ratio}, fundNav: {fund_nav}, fundUnits: {FUND_UNITS}
+}};
+
+// ═══ Fetch all live prices ═══
+function fetchAll() {{
+  var st = document.getElementById('refresh-status');
+  var btn = document.getElementById('refresh-btn');
+  var isEn = document.body.classList.contains('lang-en');
+  st.textContent = isEn ? 'Fetching...' : '获取中...';
+  st.style.color = '#888';
+  btn.disabled = true;
+  // 1) 尝试同域 prices.json（GitHub Pages每日更新，无CORS问题）
+  fetch('prices.json?t=' + Date.now())
+    .then(function(r) {{ if (!r.ok) throw new Error(r.status); return r.json(); }})
+    .then(function(d) {{ applyPrices(d, st, btn, isEn); }})
+    .catch(function() {{
+      // 2) 回退：尝试 Yahoo Finance via CORS proxy
+      fetch('https://corsproxy.io/?url=' + encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/%5EIBEX?range=1d&interval=1d'))
+        .then(function(r) {{ return r.json(); }})
+        .then(function(d) {{
+          var price = d.chart.result[0].meta.regularMarketPrice;
+          document.getElementById('ibex-input').value = Math.round(price);
+          var el = document.querySelector('[data-live="ibex"]');
+          if (el) el.textContent = Math.round(price).toLocaleString();
+          st.textContent = 'IBEX=' + Math.round(price) + ' \u2713';
+          st.style.color = '#2e7d32';
+          btn.disabled = false;
+          recalcAll();
+        }})
+        .catch(function() {{
+          st.innerHTML = isEn
+            ? 'Auto-refresh unavailable. Run <code>python3 hedge_final.py</code> locally.'
+            : '自动刷新不可用，请本地运行 <code>python3 hedge_final.py</code>';
+          st.style.color = '#c62828';
+          btn.disabled = false;
+        }});
+    }});
+}}
+function applyPrices(d, st, btn, isEn) {{
+  if (d.ibex) {{
+    document.getElementById('ibex-input').value = Math.round(d.ibex);
+    var el = document.querySelector('[data-live="ibex"]');
+    if (el) el.textContent = Math.round(d.ibex).toLocaleString();
+  }}
+  if (d.psi) {{
+    var el = document.querySelector('[data-live="psi"]');
+    if (el) el.textContent = Math.round(d.psi).toLocaleString();
+  }}
+  if (d.estx) {{
+    var el = document.querySelector('[data-live="estx"]');
+    if (el) el.textContent = Math.round(d.estx).toLocaleString();
+  }}
+  var parts = [];
+  if (d.ibex) parts.push('IBEX=' + Math.round(d.ibex));
+  if (d.psi) parts.push('PSI=' + Math.round(d.psi));
+  if (d.estx) parts.push('ESTX=' + Math.round(d.estx));
+  if (d.ts) parts.push(d.ts);
+  st.textContent = parts.join(' | ') + ' \u2713';
+  st.style.color = '#2e7d32';
+  btn.disabled = false;
+  recalcAll();
+}}
+
+// ═══ Helper functions ═══
+function setText(id, val) {{
+  var el = document.getElementById(id);
+  if (el) el.textContent = val;
+}}
+function setHtml(id, val) {{
+  var el = document.getElementById(id);
+  if (el) el.innerHTML = val;
+}}
+
+// ═══ Build compact option chain (key strikes only) ═══
+function buildChain(ibex, K, K90) {{
+  var body = document.getElementById('chain-body');
+  if (!body) return;
+  // Key strikes: 85%, 88%, 90%, 93%, 95%, ATM, 103% + ensure K and K90 are included
+  var keyPcts = [0.85, 0.88, 0.90, 0.93, 0.95, 1.00, 1.03];
+  var strikes = {{}};
+  keyPcts.forEach(function(p) {{ var s = Math.round(ibex * p / 50) * 50; strikes[s] = true; }});
+  strikes[K] = true;
+  strikes[K90] = true;
+  var sorted = Object.keys(strikes).map(Number).sort(function(a,b){{return a-b}});
+  var rows = '';
+  sorted.forEach(function(s) {{
+    var pct = ((s / ibex - 1) * 100).toFixed(1);
+    var price = bsPut(ibex, s, 1.0, P.r, P.iv);
+    var planA = '', planB = '';
+    if (s === K) planA = '\u00d78';
+    if (s === K90) {{ planA += (planA ? ' + ' : '') + '\u00d720'; planB = '\u00d724'; }}
+    var hl = (s === K || s === K90) ? ' style="background:#f0fff0;font-weight:700"' : '';
+    rows += '<tr' + hl + '><td>' + s.toLocaleString() + '</td><td>' + pct + '%</td>';
+    rows += '<td>\u20AC' + Math.round(price).toLocaleString() + '</td>';
+    rows += '<td style="color:#2e7d32;font-weight:700">' + planA + '</td>';
+    rows += '<td style="color:#e65100;font-weight:700">' + planB + '</td></tr>';
+  }});
+  body.innerHTML = rows;
+  // Also rebuild full chain if visible
+  if (document.getElementById('full-chain-box').style.display !== 'none') buildFullChain(ibex, K, K90);
+}}
+function toggleFullChain() {{
+  var box = document.getElementById('full-chain-box');
+  var link = document.getElementById('chain-toggle');
+  var isEn = document.body.classList.contains('lang-en');
+  if (box.style.display === 'none') {{
+    box.style.display = 'block';
+    buildFullChain(parseFloat(document.getElementById('ibex-input').value),
+      Math.round(parseFloat(document.getElementById('ibex-input').value)/50)*50,
+      Math.round(parseFloat(document.getElementById('ibex-input').value)*0.9/50)*50);
+    link.textContent = isEn ? 'Collapse' : '收起';
+  }} else {{
+    box.style.display = 'none';
+    link.textContent = isEn ? 'Show full chain' : '展开完整链';
+  }}
+}}
+function buildFullChain(ibex, K, K90) {{
+  var body = document.getElementById('full-chain-body');
+  if (!body) return;
+  var rows = '';
+  var lo = Math.round(ibex * 0.80 / 50) * 50;
+  var hi = Math.round(ibex * 1.05 / 50) * 50;
+  for (var s = lo; s <= hi; s += 50) {{
+    var pct = ((s / ibex - 1) * 100).toFixed(1);
+    var price = bsPut(ibex, s, 1.0, P.r, P.iv);
+    var hl = (s === K || s === K90) ? ' style="background:#f0fff0;font-weight:600"' : '';
+    rows += '<tr' + hl + '><td>' + s.toLocaleString() + '</td><td>' + pct + '%</td><td>\u20AC' + Math.round(price).toLocaleString() + '</td></tr>';
+  }}
+  body.innerHTML = rows;
+}}
+
+// ═══ Update config comparison table ═══
+function updateConfigTable(ibex, K, K90, pAtm, pOtm) {{
+  var body = document.getElementById('config-tbody');
+  if (!body) return;
+  var isEn = document.body.classList.contains('lang-en');
+  var configs = [
+    {{label: isEn ? 'Pure ATM x16' : 'ATM x16', desc: isEn ? 'Current: all ATM' : 'All ATM', legs: [{{n:16,k:K,p:pAtm}}], rec: false}},
+    {{label: 'ATM x8 + 90%OTM x20', desc: isEn ? 'Mixed: floor + crash protection' : 'Mixed', legs: [{{n:8,k:K,p:pAtm}},{{n:20,k:K90,p:pOtm}}], rec: true}},
+    {{label: 'ATM x4 + 90%OTM x30', desc: isEn ? 'Aggressive: heavy crash protection' : 'Aggressive', legs: [{{n:4,k:K,p:pAtm}},{{n:30,k:K90,p:pOtm}}], rec: false}},
+    {{label: isEn ? 'Pure 90%OTM x24' : '90%OTM x24', desc: isEn ? 'Budget: crash-only' : 'Budget', legs: [{{n:24,k:K90,p:pOtm}}], rec: false}}
+  ];
+  var rows = '';
+  configs.forEach(function(c) {{
+    var prem = 0;
+    c.legs.forEach(function(l) {{ prem += l.p * l.n; }});
+    prem = Math.round(prem);
+    var st = c.rec ? ' style="background:#f0fff0;font-weight:600"' : '';
+    var tag = c.rec ? ' <span style="color:#2e7d32;font-size:11px">[' + (isEn?'Rec.':'Rec.') + ']</span>' : '';
+    rows += '<tr' + st + '>';
+    rows += '<td style="text-align:left">' + c.label + tag + '<br><span style="font-size:10px;color:#888">' + c.desc + '</span></td>';
+    rows += '<td>&euro;' + prem.toLocaleString() + '<br><span style="font-size:10px;color:#888">' + (prem/P.fv*100).toFixed(2) + '%/' + (isEn?'yr':'yr') + '</span></td>';
+    rows += '<td>&euro;' + (prem*5).toLocaleString() + '<br><span style="font-size:10px;color:#888">' + (prem*5/P.fv*100).toFixed(1) + '%</span></td>';
+    [5,10,20,30].forEach(function(drop) {{
+      var ibexDrop = ibex * (1 - drop/100);
+      var pay = 0;
+      c.legs.forEach(function(l) {{ pay += Math.max(l.k - ibexDrop, 0) * l.n; }});
+      pay = Math.round(pay);
+      var color = pay > 0 ? '#2e7d32' : '#ccc';
+      var fw = drop >= 20 ? ';font-weight:' + (drop >= 30 ? '700' : '600') : '';
+      rows += '<td style="color:' + color + fw + '">&euro;' + pay.toLocaleString() + '</td>';
+    }});
+    rows += '</tr>';
+  }});
+  body.innerHTML = rows;
+}}
+
+// ═══ Update PSI scenario table ═══
+function updatePsiTable(tbodyId, ibex, legs, prem) {{
+  var body = document.getElementById(tbodyId);
+  if (!body) return;
+  var targets = [8500, 8000, 7500, 7000, 6000];
+  var rows = '';
+  targets.forEach(function(psiT) {{
+    var psiDrop = (psiT - P.psi) / P.psi;
+    var ibexEst = ibex * (1 + P.betaIP * psiDrop);
+    var fundEst = Math.round(P.fv * (1 + P.betaFP * psiDrop));
+    var fundLoss = P.fv - fundEst;
+    var putPay = 0;
+    legs.forEach(function(l) {{ putPay += Math.max(l.k - ibexEst, 0) * l.n; }});
+    putPay = Math.round(putPay);
+    var net = fundEst + putPay - prem;
+    var cov = fundLoss > 0 ? Math.round(putPay / fundLoss * 100) : 0;
+    var cc = cov >= 80 ? '#2e7d32' : (cov >= 40 ? '#e65100' : '#c62828');
+    var dropPct = ((psiT - P.psi) / P.psi * 100).toFixed(0);
+    rows += '<tr>';
+    rows += '<td style="font-weight:700">' + psiT.toLocaleString() + ' <span style="font-size:10px;color:#888">(' + (dropPct>0?'+':'') + dropPct + '%)</span></td>';
+    rows += '<td>&euro;' + fundEst.toLocaleString() + '</td>';
+    rows += '<td style="color:#c62828;font-weight:600">-&euro;' + fundLoss.toLocaleString() + '</td>';
+    rows += '<td style="color:#2e7d32;font-weight:600">+&euro;' + putPay.toLocaleString() + '</td>';
+    rows += '<td style="font-weight:700">&euro;' + net.toLocaleString() + '</td>';
+    rows += '<td style="color:' + cc + ';font-weight:700">' + cov + '%</td>';
+    rows += '</tr>';
+  }});
+  body.innerHTML = rows;
+}}
+
+// ═══ Update entry scenario ═══
+function updateEntryScenario(ibex, K, K90, pAtm, pOtm, premA, premB) {{
+  var psiDrop = (P.psiEntry - P.psi) / P.psi;
+  var ibexEst = Math.round(ibex * (1 + P.betaIP * psiDrop));
+  var fundEst = Math.round(P.fv * (1 + P.betaFP * psiDrop));
+  var fundLoss = P.fv - fundEst;
+  var gainNow = P.fv - P.initInv;
+
+  var paPay = Math.round(Math.max(K - ibexEst, 0) * 8 + Math.max(K90 - ibexEst, 0) * 20);
+  var paNet = fundEst + paPay - premA;
+  var paKept = gainNow > 0 ? Math.round((paNet - P.initInv) / gainNow * 100) : 0;
+  var noHedgeKept = gainNow > 0 ? Math.round((fundEst - P.initInv) / gainNow * 100) : 0;
+
+  var pbPay = Math.round(Math.max(K90 - ibexEst, 0) * 24);
+  var pbNet = fundEst + pbPay - premB;
+  var pbKept = gainNow > 0 ? Math.round((pbNet - P.initInv) / gainNow * 100) : 0;
+
+  setText('dyn-es-ibex', ibexEst.toLocaleString());
+  setText('dyn-es-fund', '\u20AC' + fundEst.toLocaleString());
+  setText('dyn-es-loss', '\u20AC' + fundLoss.toLocaleString());
+  setText('dyn-es-nohedge', noHedgeKept + '%');
+
+  setText('dyn-es-pa-pay', '+\u20AC' + paPay.toLocaleString());
+  setText('dyn-es-pa-prem', '\u2212\u20AC' + premA.toLocaleString());
+  setText('dyn-es-pa-net', '\u20AC' + paNet.toLocaleString());
+  setText('dyn-es-pa-gain', '\u20AC' + (paNet - P.initInv).toLocaleString());
+  setText('dyn-es-pa-kept', paKept + '%');
+
+  setText('dyn-es-pb-pay', '+\u20AC' + pbPay.toLocaleString());
+  setText('dyn-es-pb-prem', '\u2212\u20AC' + premB.toLocaleString());
+  setText('dyn-es-pb-net', '\u20AC' + pbNet.toLocaleString());
+  setText('dyn-es-pb-gain', '\u20AC' + (pbNet - P.initInv).toLocaleString());
+  setText('dyn-es-pb-kept', pbKept + '%');
+  setText('dyn-es-pa-kept2', paKept);
+  setText('dyn-es-pa-diff', (paKept - pbKept) + '');
+  setText('dyn-es-prem-diff', '\u20AC' + (premA - premB).toLocaleString());
+}}
+
+// ═══ Update section 7 operation step prices ═══
+function updateStepPrices(ibex, K, K90, pAtm, pOtm, premA, premB) {{
+  setText('dyn-s7-atm-k', K.toLocaleString());
+  setText('dyn-s7-otm-k', K90.toLocaleString());
+  setText('dyn-s7-atm-price', '\u20AC' + Math.round(pAtm).toLocaleString());
+  setText('dyn-s7-atm-total', '\u20AC' + Math.round(pAtm * 8).toLocaleString());
+  setText('dyn-s7-otm-price', '\u20AC' + Math.round(pOtm).toLocaleString());
+  setText('dyn-s7-otm-total', '\u20AC' + Math.round(pOtm * 20).toLocaleString());
+  setText('dyn-s7-prem-a', '\u20AC' + premA.toLocaleString());
+  setText('dyn-s7-prem-b', '\u20AC' + premB.toLocaleString());
+  setText('dyn-s7-otm-total-b', '\u20AC' + premB.toLocaleString());
+  setText('dyn-s7-otm-price-b', '\u20AC' + Math.round(pOtm).toLocaleString());
+  setText('dyn-s7-otm-k-b', K90.toLocaleString());
+  var rollAtm = Math.round(pAtm * 8 * 0.4);
+  var rollOtm = Math.round(pOtm * 20 * 0.4);
+  setText('dyn-s7-roll-full', '\u20AC' + (rollAtm + rollOtm).toLocaleString());
+  setText('dyn-s7-roll-full-yr', '\u20AC' + ((rollAtm + rollOtm) * 2).toLocaleString());
+  setText('dyn-s7-roll-split', '\u20AC' + rollAtm.toLocaleString());
+  setText('dyn-s7-roll-split-yr', '\u20AC' + (rollAtm * 2).toLocaleString());
+  setText('dyn-s7-roll-save', '\u20AC' + (rollOtm * 2).toLocaleString());
+  setText('dyn-s7-roll-save-5yr', '\u20AC' + (rollOtm * 2 * 5).toLocaleString());
+  setText('dyn-s7-trigger-a', Math.round(ibex * 1.10).toLocaleString());
+  setText('dyn-s7-trigger-b', Math.round(ibex * 1.20).toLocaleString());
+  var rollB = Math.round(pOtm * 24 * 0.4);
+  setText('dyn-s7-roll-b', '\u20AC' + rollB.toLocaleString());
+  setText('dyn-s7-roll-b-total', '\u20AC' + (premB + Math.round(rollB * 0.5)).toLocaleString());
+}}
+
+// ═══ Update payoff chart ═══
+function updatePayoffChart(divId, ibex, K, K90, legs, prem) {{
+  var el = document.getElementById(divId);
+  if (!el) return;
+  var xs = [], yFund = [], yHedged = [], yPut = [];
+  for (var psi = 5000; psi <= 11000; psi += 100) {{
+    var psiDrop = (psi - P.psi) / P.psi;
+    var fundEst = P.fv * (1 + P.betaFP * psiDrop);
+    var ibexEst = ibex * (1 + P.betaIP * psiDrop);
+    var putPay = 0;
+    legs.forEach(function(l) {{ putPay += Math.max(l.k - ibexEst, 0) * l.n; }});
+    xs.push(psi);
+    yFund.push(Math.round(fundEst));
+    yHedged.push(Math.round(fundEst + putPay - prem));
+    yPut.push(Math.round(putPay));
+  }}
+  var isEn = document.body.classList.contains('lang-en');
+  Plotly.react(divId, [
+    {{x: xs, y: yFund, name: isEn ? 'Fund (no hedge)' : 'Fund (no hedge)', line: {{color:'#c62828',width:2,dash:'dash'}}}},
+    {{x: xs, y: yHedged, name: isEn ? 'Fund + Put hedge' : 'Fund+Put', line: {{color:'#2e7d32',width:3}}}},
+    {{x: xs, y: yPut, name: isEn ? 'Put payout' : 'Put payout', line: {{color:'#1565c0',width:2,dash:'dot'}}, yaxis: 'y2'}}
+  ], {{
+    template: 'plotly_white', height: 360,
+    xaxis: {{title: isEn ? 'PSI20 Level' : 'PSI20'}},
+    yaxis: {{title: isEn ? 'Fund Value (EUR)' : 'Fund Value (EUR)', tickformat: ','}},
+    yaxis2: {{title: isEn ? 'Put Payout (EUR)' : 'Put Payout (EUR)', overlaying: 'y', side: 'right', tickformat: ',', showgrid: false}},
+    legend: {{x:0.01,y:0.01,bgcolor:'rgba(255,255,255,0.9)'}},
+    margin: {{t:10,b:50,l:80,r:80}}, hovermode: 'x unified'
+  }}, {{responsive: true}});
+}}
+
+// ═══ Master recalculation ═══
+function recalcAll() {{
+  var ibex = parseFloat(document.getElementById('ibex-input').value);
+  if (isNaN(ibex) || ibex < 5000 || ibex > 30000) return;
+
+  var K = Math.round(ibex / 50) * 50;
+  var K90 = Math.round(ibex * 0.9 / 50) * 50;
+  var pAtm = bsPut(ibex, K, 1.0, P.r, P.iv);
+  var pOtm = bsPut(ibex, K90, 1.0, P.r, P.iv);
+
+  var premA = Math.round(pAtm * 8 + pOtm * 20);
+  var premB = Math.round(pOtm * 24);
+
+  // Update option chain
+  buildChain(ibex, K, K90);
+
+  // Update Plan A rec box
+  setText('dyn-pa-atm-k', K.toLocaleString());
+  setText('dyn-pa-otm-k', K90.toLocaleString());
+  setText('dyn-pa-prem', '\u20AC' + premA.toLocaleString());
+  setText('dyn-pa-prem-pct', (premA/P.fv*100).toFixed(2) + '%');
+  setText('dyn-pa-5yr', '\u20AC' + (premA*5).toLocaleString());
+
+  // Update Plan B rec box
+  setText('dyn-pb-otm-k', K90.toLocaleString());
+  setText('dyn-pb-prem', '\u20AC' + premB.toLocaleString());
+  setText('dyn-pb-prem-pct', (premB/P.fv*100).toFixed(2) + '%');
+  setText('dyn-pb-5yr', '\u20AC' + (premB*5).toLocaleString());
+  setText('dyn-pb-save', Math.round((1-premB/premA)*100) + '%');
+
+  // Update config comparison table
+  updateConfigTable(ibex, K, K90, pAtm, pOtm);
+
+  // Update PSI scenario tables
+  updatePsiTable('psi-tbody-a', ibex, [{{n:8,k:K}}, {{n:20,k:K90}}], premA);
+  updatePsiTable('psi-tbody-b', ibex, [{{n:24,k:K90}}], premB);
+
+  // Update entry scenario
+  updateEntryScenario(ibex, K, K90, pAtm, pOtm, premA, premB);
+
+  // Update section 7 prices
+  updateStepPrices(ibex, K, K90, pAtm, pOtm, premA, premB);
+
+  // Update payoff charts
+  updatePayoffChart('c5', ibex, K, K90, [{{n:8,k:K}},{{n:20,k:K90}}], premA);
+  updatePayoffChart('c5b', ibex, K, K90, [{{n:24,k:K90}}], premB);
+}}
+
+// Build initial option chain on page load
+buildChain({ibex_now}, {rec['K']}, {K_90});
 </script></body></html>"""
 
     html = html.replace('__C5B__',planb_chart).replace('__C1__',c1).replace('__C2__',c2).replace('__C5__',c5)
@@ -1062,6 +1459,22 @@ def main():
     out = os.path.join(DATA_DIR, 'hedge_final.html')
     with open(out, 'w', encoding='utf-8') as f: f.write(html)
     print(f'→ {out}')
+    # 输出 prices.json 供页面刷新按钮使用（同域，无CORS问题）
+    import json as _json
+    prices_json = _json.dumps(dict(
+        ibex=ibex_now, psi=psi_now, estx=estx_now,
+        fund_nav=fund_nav, fund_value=fund_value,
+        ts=gen_time, fund_src=fund_src,
+        fund_date=prices.get('fund_date','?'),
+        psi_date=prices.get('psi_date','?'),
+        ibex_date=prices.get('ibex_date','?'),
+        estx_date=prices.get('estx_date','?'),
+    ))
+    docs_dir = os.path.join(DATA_DIR, 'docs')
+    if os.path.isdir(docs_dir):
+        pj = os.path.join(docs_dir, 'prices.json')
+        with open(pj, 'w') as f: f.write(prices_json)
+        print(f'→ {pj}')
     import subprocess, platform
     if platform.system() == 'Darwin': subprocess.run(['open', out])
 
