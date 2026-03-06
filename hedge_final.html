@@ -94,7 +94,7 @@ body.lang-zh .en{display:none}
   </div>
   <div style="text-align:right;min-width:200px;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
     <div style="font-size:11px;color:#888"><span class="zh">报告生成于</span><span class="en">Report generated at</span></div>
-    <div style="font-size:15px;font-weight:800;color:#1a237e">2026-03-06 09:41</div>
+    <div style="font-size:15px;font-weight:800;color:#1a237e">2026-03-06 10:15</div>
     <div class="timer" id="timer"></div>
     <button onclick="fetchAll()" id="refresh-btn" style="margin-top:4px;padding:6px 16px;border:2px solid #1a237e;border-radius:8px;background:#eef2ff;cursor:pointer;font-weight:700;font-size:12px;color:#1a237e"><span class="zh">刷新数据</span><span class="en">Refresh Data</span></button>
     <span id="refresh-status" style="font-size:11px"></span>
@@ -343,10 +343,11 @@ body.lang-zh .en{display:none}
   <tbody id="chain-body"></tbody>
 </table>
 <div style="font-size:11px;color:#aaa;margin-top:4px">
-  <span class="zh">实际OTM价格因IV skew可能高30-50%，以实盘报价为准。</span><span class="en">Actual OTM prices may be 30-50% higher due to IV skew. Use live quotes.</span>
-  <span class="zh">查看实盘：</span><span class="en">Live prices: </span>
-  <a href="https://www.meff.es/ing/Financial-Derivatives/Options-on-IBEX-35" target="_blank" style="color:#1a237e;font-weight:600">MEFF</a>
+  <span class="zh">以上为BS理论价，实际OTM价格因IV skew可能高30-50%。</span><span class="en">Above are BS theoretical prices. Actual OTM prices may be 30-50% higher due to IV skew.</span>
+  <span class="zh">查看实盘报价：</span><span class="en">View live quotes: </span>
+  <a href="https://www.meff.es/docs/Ficheros/boletin/ing/boletiipthu.htm" target="_blank" style="color:#1a237e;font-weight:600"><span class="zh">MEFF每日行情公报（含完整期权链）</span><span class="en">MEFF Daily Bulletin (full option chain)</span></a>
   &middot; <a href="https://www.meff.es/aspx/calculadoras/calculadoraOp.aspx?id=ing" target="_blank" style="color:#1a237e;font-weight:600"><span class="zh">MEFF期权计算器</span><span class="en">MEFF Option Simulator</span></a>
+  &middot; <a href="https://www.meff.es/ing/Financial-Derivatives/Market-Prices" target="_blank" style="color:#1a237e;font-weight:600"><span class="zh">MEFF实时行情</span><span class="en">MEFF Market Prices</span></a>
   &middot; <a href="javascript:void(0)" onclick="toggleFullChain()" id="chain-toggle" style="color:#1a237e;font-weight:600"><span class="zh">展开完整链</span><span class="en">Show full chain</span></a>
 </div>
 <div id="full-chain-box" style="display:none;margin-top:8px">
@@ -704,7 +705,7 @@ function showTab(i){
 if(Z[0]){Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{responsive:true});document.getElementById('zoom_0').dataset.r='1'}
 // Countdown since generation
 (function(){
-  var gen=new Date('2026-03-06T09:41:00');
+  var gen=new Date('2026-03-06T10:15:00');
   var el=document.getElementById('timer');
   function tick(){
     var now=new Date();var d=Math.floor((now-gen)/1000);

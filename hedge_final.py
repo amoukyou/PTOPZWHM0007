@@ -773,10 +773,11 @@ body.lang-zh .en{{display:none}}
   <tbody id="chain-body"></tbody>
 </table>
 <div style="font-size:11px;color:#aaa;margin-top:4px">
-  {t('实际OTM价格因IV skew可能高30-50%，以实盘报价为准。','Actual OTM prices may be 30-50% higher due to IV skew. Use live quotes.')}
-  {t('查看实盘：','Live prices: ')}
-  <a href="https://www.meff.es/ing/Financial-Derivatives/Options-on-IBEX-35" target="_blank" style="color:#1a237e;font-weight:600">MEFF</a>
+  {t('以上为BS理论价，实际OTM价格因IV skew可能高30-50%。','Above are BS theoretical prices. Actual OTM prices may be 30-50% higher due to IV skew.')}
+  {t('查看实盘报价：','View live quotes: ')}
+  <a href="https://www.meff.es/docs/Ficheros/boletin/ing/boletiipthu.htm" target="_blank" style="color:#1a237e;font-weight:600">{t('MEFF每日行情公报（含完整期权链）','MEFF Daily Bulletin (full option chain)')}</a>
   &middot; <a href="https://www.meff.es/aspx/calculadoras/calculadoraOp.aspx?id=ing" target="_blank" style="color:#1a237e;font-weight:600">{t('MEFF期权计算器','MEFF Option Simulator')}</a>
+  &middot; <a href="https://www.meff.es/ing/Financial-Derivatives/Market-Prices" target="_blank" style="color:#1a237e;font-weight:600">{t('MEFF实时行情','MEFF Market Prices')}</a>
   &middot; <a href="javascript:void(0)" onclick="toggleFullChain()" id="chain-toggle" style="color:#1a237e;font-weight:600">{t('展开完整链','Show full chain')}</a>
 </div>
 <div id="full-chain-box" style="display:none;margin-top:8px">
