@@ -366,6 +366,8 @@ def analyze(fund_df, ibex_df, psi_df, live):
     fv = live['fund_value']
     ibex_now = live['ibex']
     psi_now = live['psi']
+    # 使用MEFF实际最长Put到期期限，没有实时数据时fallback到1年
+    T_put = live.get('best_put_T', 1.0)
 
     df = pd.merge(fund_df[['Date','Close']].rename(columns={'Close':'fund'}),
                   ibex_df, on='Date', how='inner').sort_values('Date').reset_index(drop=True)
@@ -396,13 +398,13 @@ def analyze(fund_df, ibex_df, psi_df, live):
     avg_crash_ratio = round(np.mean(crash_ratios), 3) if crash_ratios else BETA_FUND_IBEX
     # Recommendation (base: 16 contracts)
     K = round(ibex_now / 50) * 50  # MEFF标准行权价间距50点
-    p1 = bs_put(ibex_now, K, 1.0)
-    rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/fv*100,2))
+    p1 = bs_put(ibex_now, K, T_put)
+    rec = dict(K=K, price=round(p1,1), total=round(p1*N_CONTRACTS), annual=round(p1*N_CONTRACTS/fv*100,2), T=T_put)
     # Mixed-strike configurations
     K_90 = round(ibex_now * 0.90 / 50) * 50
     K_85 = round(ibex_now * 0.85 / 50) * 50
-    p_90 = bs_put(ibex_now, K_90, 1.0)
-    p_85 = bs_put(ibex_now, K_85, 1.0)
+    p_90 = bs_put(ibex_now, K_90, T_put)
+    p_85 = bs_put(ibex_now, K_85, T_put)
     options = []
     configs = [
         (t('纯ATM ×16','Pure ATM ×16'), t('现方案：全部平值','Current: all ATM'), [(16, K, p1)]),
@@ -566,10 +568,11 @@ def make_zoom_charts(df, events, strats, fv):
 def chart_payoff(rec, live):
     """损益图：x轴=PSI20点位, y轴=基金市值(EUR), 显示混合配置"""
     fv, psi_now, ibex_now = live['fund_value'], live['psi'], live['ibex']
+    T_put = live.get('best_put_T', 1.0)
     K_atm = rec['K']
     K_90 = round(ibex_now * 0.90 / 50) * 50
-    p1 = bs_put(ibex_now, K_atm, 1.0)
-    p_90 = bs_put(ibex_now, K_90, 1.0)
+    p1 = bs_put(ibex_now, K_atm, T_put)
+    p_90 = bs_put(ibex_now, K_90, T_put)
     # 推荐混合配置
     mix_prem = round(p1*8 + p_90*20)
     atm_prem = round(p1*16)
@@ -609,8 +612,9 @@ def chart_payoff(rec, live):
 def chart_payoff_planb(rec, live):
     """损益图：Plan B 纯OTM×24"""
     fv, psi_now, ibex_now = live['fund_value'], live['psi'], live['ibex']
+    T_put = live.get('best_put_T', 1.0)
     K_90 = round(ibex_now * 0.90 / 50) * 50
-    p_90 = bs_put(ibex_now, K_90, 1.0)
+    p_90 = bs_put(ibex_now, K_90, T_put)
     otm_prem = round(p_90*24)
     psi_x = np.linspace(5000, 11000, 500)
     psi_ret = (psi_x - psi_now) / psi_now
@@ -642,7 +646,7 @@ def t(zh, en):
     """Bilingual text wrapper"""
     return f'<span class="zh">{zh}</span><span class="en">{en}</span>'
 
-def _build_live_chain_html(live, ibex_now, K_atm, K_otm):
+def _build_live_chain_html(live, ibex_now, K_atm, K_otm, best_exp_code=None):
     """生成MEFF实时期权链HTML表格"""
     chain_data = live.get('meff_chain', {})
     chains = chain_data.get('chains', {})
@@ -715,11 +719,14 @@ def _build_live_chain_html(live, ibex_now, K_atm, K_otm):
                 <td style="text-align:right">{last_s}</td>
                 <td style="text-align:center">{liq}{tag}</td></tr>'''
 
-        panel_id = f'chain-panel-{idx}'
+        is_rec = (code == best_exp_code)
+        open_attr = ' open' if is_rec else ''
+        border_color = '#1a237e' if is_rec else '#ccc'
+        rec_badge = f' <span style="background:#1a237e;color:white;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">{t("推荐","REC")}</span>' if is_rec else ''
         panels_html += f'''
-<details style="margin-bottom:8px;border:1px solid #ccc;border-radius:8px;overflow:hidden">
-  <summary style="padding:10px 14px;background:#f5f5f5;cursor:pointer;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
-    <span>{t('到期','Expiry')} <b>{exp_label}</b> ({t(f'约{months:.0f}个月',f'~{months:.0f} months')}) — {len(filtered)} {t('个行权价','strikes')}</span>
+<details style="margin-bottom:8px;border:2px solid {border_color};border-radius:8px;overflow:hidden"{open_attr}>
+  <summary style="padding:10px 14px;background:{'#e8eaf6' if is_rec else '#f5f5f5'};cursor:pointer;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+    <span>{t('到期','Expiry')} <b>{exp_label}</b> ({t(f'约{months:.0f}个月',f'~{months:.0f} months')}) — {len(filtered)} {t('个行权价','strikes')}{rec_badge}</span>
     <span style="color:#1a237e;font-size:12px">{summary}</span>
   </summary>
   <div style="overflow-x:auto;padding:0">
@@ -761,6 +768,8 @@ def generate_html(fund_df, psi_df, res, live):
     crash_ratios = res['crash_ratios']
     es = res['entry_scenario']
     K = rec['K']
+    T_put = rec.get('T', 1.0)
+    put_expiry_label = live.get('best_put_expiry_label', '2027-03')
     fv = live['fund_value']
     fund_nav = live['fund_nav']
     psi_now = live['psi']
@@ -1097,7 +1106,7 @@ body.lang-zh .en{{display:none}}
   <span style="font-size:14px;font-weight:700;color:#1a237e">{t('IBEX35 Put 期权定价参考','IBEX35 Put Pricing Reference')}</span>
   <span style="font-size:11px;color:{'#2e7d32' if live.get('meff_source')=='MEFF' else '#aaa'}">
     {'MEFF ' + t('实盘IV插值','market IV interpolated') + ' (' + live.get('meff_expiry','?') + ', ' + str(len(live.get('meff_points',[]))) + t('个数据点',' data points') + ')' if live.get('meff_source')=='MEFF' else 'BS ' + t('理论价','theoretical') + ' | IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}
-    | r={ECB_RATE*100:.1f}% | T=1yr | {t('到期','Expiry')} {live.get('meff_expiry','2027-03')}
+    | r={ECB_RATE*100:.1f}% | T={T_put:.2f}yr | {t('到期','Expiry')} {live.get('meff_expiry','2027-03')}
   </span>
 </div>
 <table id="option-chain-table" style="font-size:13px">
@@ -1154,7 +1163,7 @@ body.lang-zh .en{{display:none}}
   {cost_rows}
 </table>
 <div class="alert a-info">
-  {t('三种频率保护效果接近，但成本差距大。','All three frequencies offer similar protection, but costs differ significantly.')}<b>{t('12个月年滚花最少的钱，操作最简单。','12-month annual rolling costs the least and is simplest to operate.')}</b>
+  {t('三种频率保护效果接近，但成本差距大。','All three frequencies offer similar protection, but costs differ significantly.')}<b>{t(f'选最长可用到期月（当前{put_expiry_label}，约{round(T_put*12)}个月），花最少的钱，操作最简单。',f'Choose the longest available expiry (currently {put_expiry_label}, ~{round(T_put*12)} months) for lowest cost and simplest operation.')}</b>
 </div>
 </div>
 
@@ -1163,7 +1172,7 @@ body.lang-zh .en{{display:none}}
 <div class="section">
 <h2>{t('六、推荐方案 A：混合行权价','Section 6: Recommended Plan A — Mixed Strike')}</h2>
 <div class="rec">
-  <h3>ATM Put &times;8 + 90%OTM Put &times;20{t('，12个月年滚 + 动态滚仓',', 12-Month Annual Roll + Dynamic Rolling')}</h3>
+  <h3>ATM Put &times;8 + 90%OTM Put &times;20{t(f'，{round(T_put*12)}个月滚仓 + 动态滚仓', f', {round(T_put*12)}-Month Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
@@ -1252,15 +1261,15 @@ body.lang-zh .en{{display:none}}
 </div>
 </div>
 
-{_build_live_chain_html(live, ibex_now, K, K_90)}
+{_build_live_chain_html(live, ibex_now, K, K_90, live.get('best_put_expiry_code'))}
 <!-- ===== Plan A: 七 ===== -->
 <div class="plan-panel-a show">
 <div class="section">
 <h2>{t('七、操作步骤（方案A）','Section 7: Operating Steps (Plan A)')}</h2>
 <div class="steps"><ol>
   <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
-  <li><b>{t('买第一腿——ATM Put &times;8','Buy Leg 1 — ATM Put &times;8')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-atm-k">{rec['K']:,}</span></b>{t('（ATM，50点间距）。参考价约',' (ATM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-atm-price">&euro;{rec['price']:,.0f}</span>/{t('张','contract')}{t('，8张合计约',', 8 contracts total ~')}<span id="dyn-s7-atm-total">&euro;{round(rec['price']*8):,}</span>。</li>
-  <li><b>{t('买第二腿——90%OTM Put &times;20','Buy Leg 2 — 90%OTM Put &times;20')}</b>{t('：同到期月，行权价',': Same expiry month, strike')}<b><span id="dyn-s7-otm-k">{K_90:,}</span></b> (90% OTM){t('。参考价约','. Ref. price ~')}<span id="dyn-s7-otm-price">&euro;{round(bs_put(ibex_now,K_90,1.0)):,}</span>/{t('张','contract')}{t('，20张合计约',', 20 contracts total ~')}<span id="dyn-s7-otm-total">&euro;{round(bs_put(ibex_now,K_90,1.0)*20):,}</span>。</li>
+  <li><b>{t('买第一腿——ATM Put &times;8','Buy Leg 1 — ATM Put &times;8')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>{put_expiry_label}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-atm-k">{rec['K']:,}</span></b>{t('（ATM，50点间距）。参考价约',' (ATM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-atm-price">&euro;{rec['price']:,.0f}</span>/{t('张','contract')}{t('，8张合计约',', 8 contracts total ~')}<span id="dyn-s7-atm-total">&euro;{round(rec['price']*8):,}</span>。</li>
+  <li><b>{t('买第二腿——90%OTM Put &times;20','Buy Leg 2 — 90%OTM Put &times;20')}</b>{t('：同到期月，行权价',': Same expiry month, strike')}<b><span id="dyn-s7-otm-k">{K_90:,}</span></b> (90% OTM){t('。参考价约','. Ref. price ~')}<span id="dyn-s7-otm-price">&euro;{round(bs_put(ibex_now,K_90,T_put)):,}</span>/{t('张','contract')}{t('，20张合计约',', 20 contracts total ~')}<span id="dyn-s7-otm-total">&euro;{round(bs_put(ibex_now,K_90,T_put)*20):,}</span>。</li>
   <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-a">&euro;{rec_prem:,}</span> (Black-Scholes, {'MEFF IV ' + t('插值','interpolated') if live.get('meff_source')=='MEFF' else 'IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}, r={ECB_RATE*100:.1f}%){t('。','.')}
   <b>{t('实际市价预计上浮10-30%','Actual market price expected 10-30% higher')}</b>{t('，尤其OTM Put因波动率偏斜（skew）真实IV约22-25%，比报告使用的平值IV='+str(IBEX_IMPLIED_VOL*100)+'%更高，OTM部分实际价格可能高于BS理论值30-50%。下单前务必以IBKR/MEFF实际报价为准。',', especially OTM Puts due to volatility skew (actual IV ~22-25%, higher than the ATM IV='+str(IBEX_IMPLIED_VOL*100)+'% used in this report). OTM actual prices may be 30-50% above BS theoretical values. Always use IBKR/MEFF live quotes before placing orders.')}</li>
   <li><b>{t('分腿动态滚仓','Split-Leg Dynamic Rolling')}</b>{t('（关键！）：ATM腿和OTM腿职责不同，滚仓策略也不同：',' (Critical!): ATM and OTM legs have different roles, so different rolling strategies:')}<br>
@@ -1270,9 +1279,9 @@ body.lang-zh .en{{display:none}}
 </ol></div>
 <div class="alert a-info" style="font-size:13px">
   <b>{t('分腿滚仓的成本优势','Cost Advantage of Split-Leg Rolling')}</b>{t('：每次动态触发只滚8张ATM（而非全部28张），大幅降低滚仓损耗。',': Each dynamic trigger only rolls 8 ATM contracts (not all 28), significantly reducing rolling costs.')}<br>
-  &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <b><span id="dyn-s7-roll-full">&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-full-yr">&euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,1.0)*20*0.4)*2):,}</span>/{t('年','yr')}<br>
+  &middot; <b>{t('全部滚仓','Roll All')}</b>{t('（旧方案）：28张全滚，单次损耗',' (old plan): roll all 28, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% + 20&times;&euro;{round(bs_put(ibex_now,K_90,T_put)):,}&times;40% = <b><span id="dyn-s7-roll-full">&euro;{round(rec['price']*8*0.4 + bs_put(ibex_now,K_90,T_put)*20*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-full-yr">&euro;{round((rec['price']*8*0.4 + bs_put(ibex_now,K_90,T_put)*20*0.4)*2):,}</span>/{t('年','yr')}<br>
   &middot; <b>{t('分腿滚仓','Split-Leg Rolling')}</b>{t('（推荐）：只滚8张ATM，单次损耗',' (recommended): only roll 8 ATM, single roll cost')} &asymp; 8&times;&euro;{rec['price']:,.0f}&times;40% = <b><span id="dyn-s7-roll-split">&euro;{round(rec['price']*8*0.4):,}</span></b>{t('，每年2次',', 2x/yr')} = <span id="dyn-s7-roll-split-yr">&euro;{round(rec['price']*8*0.4*2):,}</span>/{t('年','yr')}<br>
-  &middot; <b>{t('每年节省约','Annual savings ~')}<span id="dyn-s7-roll-save">&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2):,}</span></b>{t('，5年节省约',', 5-year savings ~')}<span id="dyn-s7-roll-save-5yr">&euro;{round(bs_put(ibex_now,K_90,1.0)*20*0.4*2*5):,}</span><br><br>
+  &middot; <b>{t('每年节省约','Annual savings ~')}<span id="dyn-s7-roll-save">&euro;{round(bs_put(ibex_now,K_90,T_put)*20*0.4*2):,}</span></b>{t('，5年节省约',', 5-year savings ~')}<span id="dyn-s7-roll-save-5yr">&euro;{round(bs_put(ibex_now,K_90,T_put)*20*0.4*2*5):,}</span><br><br>
   <b>{t('代价','Trade-off')}</b>{t('：在"连续大涨后崩盘"的极端场景中，未滚仓的OTM行权价较低，赔付会少约',': In the extreme "sustained rally then crash" scenario, unrolled OTM strikes are lower, payout will be ~')}&euro;{round((ibex_now*0.1)*20):,}{t(' 少。但这笔差额与5年节省的滚仓成本大致打平。在更常见的"涨后中小跌"场景中，OTM本来就不赔，分不分开滚没有区别。',' less. But this difference roughly offsets the 5-year rolling cost savings. In the more common "rally then small drop" scenario, OTM wouldn&rsquo;t pay out anyway, so split vs. unified rolling makes no difference.')}
 </div>
 </div>
@@ -1284,7 +1293,7 @@ body.lang-zh .en{{display:none}}
 <h2>{t('七、操作步骤（方案B）','Section 7: Operating Steps (Plan B)')}</h2>
 <div class="steps"><ol>
   <li><b>{t('IBKR账户','IBKR Account')}</b>{t('：开通欧洲期权交易权限，交易所选MEFF。',': Enable European options trading permission, select MEFF exchange.')}</li>
-  <li><b>{t('买90%OTM Put &times;24','Buy 90%OTM Put &times;24')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>2027{t('年3月',' March')}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-otm-k-b">{K_90:,}</span></b>{t('（90% OTM，50点间距）。参考价约',' (90% OTM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-otm-price-b">&euro;{round(bs_put(ibex_now,K_90,1.0)):,}</span>/{t('张','contract')}{t('，24张合计约',', 24 contracts total ~')}<span id="dyn-s7-otm-total-b">&euro;{planb_prem:,}</span>。</li>
+  <li><b>{t('买90%OTM Put &times;24','Buy 90%OTM Put &times;24')}</b>{t('：搜索Mini IBEX期权，到期月',': Search Mini IBEX options, expiry month')}<b>{put_expiry_label}</b>{t('，类型Put，行权价',', type Put, strike')}<b><span id="dyn-s7-otm-k-b">{K_90:,}</span></b>{t('（90% OTM，50点间距）。参考价约',' (90% OTM, 50-pt intervals). Ref. price ~')}<span id="dyn-s7-otm-price-b">&euro;{round(bs_put(ibex_now,K_90,T_put)):,}</span>/{t('张','contract')}{t('，24张合计约',', 24 contracts total ~')}<span id="dyn-s7-otm-total-b">&euro;{planb_prem:,}</span>。</li>
   <li><b>{t('总保费','Total Premium')}</b>{t('约',' ~')}<span id="dyn-s7-prem-b">&euro;{planb_prem:,}</span> (Black-Scholes, {'MEFF IV ' + t('插值','interpolated') if live.get('meff_source')=='MEFF' else 'IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}, r={ECB_RATE*100:.1f}%){t('。','.')}
   <b>{t('实际市价预计上浮30-50%','Actual market price expected 30-50% higher')}</b>{t('——OTM Put因波动率偏斜（skew）真实IV约22-25%，远高于平值IV='+str(IBEX_IMPLIED_VOL*100)+'%。实际年成本可能达',' — OTM Puts have higher actual IV (~22-25%) due to volatility skew, well above ATM IV='+str(IBEX_IMPLIED_VOL*100)+'%. Actual annual cost may reach')}&euro;{round(planb_prem*1.4):,}~{round(planb_prem*1.5):,}{t('。下单前务必以IBKR/MEFF实际报价为准。','. Always use IBKR/MEFF live quotes before placing orders.')}</li>
   <li><b>{t('动态滚仓','Dynamic Rolling')}</b>{t('：方案B全部是OTM Put，与方案A的分腿滚仓逻辑类似——OTM的职责是防崩盘，IBEX涨10%后从虚值10%变成虚值20%，但大崩盘时仍会深度实值。因此方案B',': Plan B is all OTM Puts, similar logic to Plan A&rsquo;s split-leg rolling — OTM&rsquo;s role is crash protection. After IBEX rises 10%, OTM goes from 10% to 20% OTM, but in a real crash it&rsquo;ll still be deep ITM. So Plan B')}<b>{t('以年度正常滚仓为主','primarily uses annual expiry rolling')}</b>{t('，不需要频繁动态触发。',', no frequent dynamic triggers needed.')}<br>
@@ -1294,8 +1303,8 @@ body.lang-zh .en{{display:none}}
 <div class="alert a-warn" style="font-size:13px">
   <b>{t('方案B注意','Plan B Note')}</b>{t('：因为全部是OTM Put，小幅回调时Put不会赔付。这是刻意的选择——用更低成本换取"只防大灾"的保护。如果你发现自己担心5-10%的回调没有保护，应该切换到方案A。',': Since all contracts are OTM Puts, there is no payout during small pullbacks. This is intentional — lower cost in exchange for "crash-only" protection. If you find yourself worried about 5-10% pullbacks having no coverage, switch to Plan A.')}<br><br>
   <b>{t('方案B的滚仓成本优势','Plan B Rolling Cost Advantage')}</b>{t('：因为以年度滚仓为主（动态触发阈值为20%，远高于方案A的10%），预计每年额外动态滚仓0-1次，滚仓损耗远低于方案A。',': Since annual rolling is primary (dynamic trigger threshold is 20%, much higher than Plan A&rsquo;s 10%), expect 0-1 extra dynamic rolls per year, far less rolling cost than Plan A.')}
-  {t('即使触发1次：','Even if triggered once: ')}24&times;&euro;{round(bs_put(ibex_now,K_90,1.0)):,}&times;40% = <span id="dyn-s7-roll-b">&euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4):,}</span>。
-  {t('方案B真实年化总成本','Plan B true annualized total cost')} &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,} ({t('平均0.5次/年','avg 0.5x/yr')}) = <b><span id="dyn-s7-roll-b-total">&euro;{planb_prem + round(bs_put(ibex_now,K_90,1.0)*24*0.4*0.5):,}</span></b> ({t('未含skew上浮','excl. skew markup')})。
+  {t('即使触发1次：','Even if triggered once: ')}24&times;&euro;{round(bs_put(ibex_now,K_90,T_put)):,}&times;40% = <span id="dyn-s7-roll-b">&euro;{round(bs_put(ibex_now,K_90,T_put)*24*0.4):,}</span>。
+  {t('方案B真实年化总成本','Plan B true annualized total cost')} &asymp; &euro;{planb_prem:,} + &euro;{round(bs_put(ibex_now,K_90,T_put)*24*0.4*0.5):,} ({t('平均0.5次/年','avg 0.5x/yr')}) = <b><span id="dyn-s7-roll-b-total">&euro;{planb_prem + round(bs_put(ibex_now,K_90,T_put)*24*0.4*0.5):,}</span></b> ({t('未含skew上浮','excl. skew markup')})。
 </div>
 </div>
 </div>
@@ -1323,7 +1332,7 @@ body.lang-zh .en{{display:none}}
 <h2>{t('九、总结','Section 9: Summary')}</h2>
 <div class="plan-panel-a show">
 <div class="alert a-note" style="font-size:14px;line-height:1.9">
-  <b style="font-size:17px;color:#4a148c">{t('方案A：ATM &times;8 + 90%OTM &times;20，12个月年滚 + 动态滚仓','Plan A: ATM &times;8 + 90%OTM &times;20, 12-Month Annual Roll + Dynamic Rolling')}</b><br>
+  <b style="font-size:17px;color:#4a148c">{t(f'方案A：ATM &times;8 + 90%OTM &times;20，{round(T_put*12)}个月滚仓 + 动态滚仓',f'Plan A: ATM &times;8 + 90%OTM &times;20, {round(T_put*12)}-Month Roll + Dynamic Rolling')}</b><br>
   <b>{t('能做到的','What it can do')}</b>{t('：历史'+str(nt)+'次急跌IBEX 100%同步下跌。混合配置用同样预算换更多合约，大跌时赔付高于纯ATM×16，同时8张ATM保留小跌保护。',': In all '+str(nt)+' historical crashes, IBEX dropped 100% in sync. Mixed config uses the same budget for more contracts, higher payout in large drops vs pure ATM×16, while 8 ATM contracts retain small-drop protection.')}<br>
   <b>{t('做不到的','What it cannot do')}</b>{t('：无法覆盖IBEX以外58%的风险（R&sup2;=42%）。在"先涨后跌"行情下，如果没有及时动态滚仓，Put可能接近废纸。',': Cannot cover the 58% of risk unrelated to IBEX (R&sup2;=42%). In "rally-then-crash" scenarios, Puts may become nearly worthless without timely dynamic rolling.')}<br>
   <b>{t('成本','Cost')}</b>{t('：年化'+f'{rec_prem/fv*100:.2f}'+'%（&euro;'+f'{rec_prem:,}'+'/年），5年约&euro;'+f'{rec_prem*5:,}'+'，是确定的支出。',': Annualized '+f'{rec_prem/fv*100:.2f}'+'% (&euro;'+f'{rec_prem:,}'+'/yr), ~&euro;'+f'{rec_prem*5:,}'+' over 5 years — a certain cost.')}<br>
@@ -1332,7 +1341,7 @@ body.lang-zh .en{{display:none}}
 </div>
 <div class="plan-panel-b">
 <div class="alert a-note" style="font-size:14px;line-height:1.9;border-color:#e65100;background:#fff3e0">
-  <b style="font-size:17px;color:#e65100">{t('方案B：纯90%OTM &times;24，12个月年滚 + 动态滚仓','Plan B: Pure 90%OTM &times;24, 12-Month Annual Roll + Dynamic Rolling')}</b><br>
+  <b style="font-size:17px;color:#e65100">{t(f'方案B：纯90%OTM &times;24，{round(T_put*12)}个月滚仓 + 动态滚仓',f'Plan B: Pure 90%OTM &times;24, {round(T_put*12)}-Month Roll + Dynamic Rolling')}</b><br>
   <b>{t('能做到的','What it can do')}</b>{t('：在崩盘式暴跌（>10%）时提供赔付，成本比方案A低'+str(round((1-planb_prem/rec_prem)*100))+'%。',': Provides payout during crash-level drops (>10%), '+str(round((1-planb_prem/rec_prem)*100))+'% cheaper than Plan A.')}<br>
   <b>{t('做不到的','What it cannot do')}</b>{t('：5-10%的中等回调完全没有保护。同样无法覆盖IBEX以外58%的风险。',': Zero protection for 5-10% medium pullbacks. Also cannot cover the 58% of risk unrelated to IBEX.')}<br>
   <b>{t('成本','Cost')}</b>{t('：年化'+f'{planb_prem/fv*100:.2f}'+'%（&euro;'+f'{planb_prem:,}'+'/年），5年约&euro;'+f'{planb_prem*5:,}'+'。',': Annualized '+f'{planb_prem/fv*100:.2f}'+'% (&euro;'+f'{planb_prem:,}'+'/yr), ~&euro;'+f'{planb_prem*5:,}'+' over 5 years.')}<br>
@@ -1852,6 +1861,22 @@ def main():
         total = sum(len(v) for v in chain_data['chains'].values())
         put_exps = [k for k in chain_data['chains'] if k.startswith('OPE')]
         print(f'  {len(put_exps)}个到期月, 共{total}个报价')
+        # 找最长的Put到期月，计算真实T
+        best_code, best_date, best_days = None, None, 0
+        for code in put_exps:
+            try:
+                exp = datetime.strptime(code[3:], '%Y%m%d')
+                d = (exp - datetime.now()).days
+                if d > best_days:
+                    best_code, best_date, best_days = code, exp, d
+            except ValueError:
+                continue
+        if best_code:
+            live['best_put_expiry_code'] = best_code
+            live['best_put_expiry_date'] = best_date.strftime('%Y-%m-%d')
+            live['best_put_expiry_label'] = chain_data.get('labels', {}).get(best_code, best_date.strftime('%d/%m/%Y'))
+            live['best_put_T'] = round(best_days / 365, 3)
+            print(f'  最长Put到期: {live["best_put_expiry_label"]} (T={live["best_put_T"]:.2f}年, {best_days}天)')
     else:
         print('  实时期权链抓取失败')
         live['meff_chain'] = {}
