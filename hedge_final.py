@@ -668,42 +668,45 @@ def _build_live_chain_html(live, ibex_now, K_atm, K_otm):
     if not put_exps:
         return ''
 
-    rows_html = ''
-    for code, exp_date, days in put_exps:
+    # 为每个到期月生成一个可折叠的表格
+    panels_html = ''
+    for idx, (code, exp_date, days) in enumerate(put_exps):
         pts = chains.get(code, [])
         if not pts:
             continue
         exp_label = labels.get(code, exp_date.strftime('%d/%m/%Y'))
         months = days / 30.4
-        rows_html += f'''<tr style="background:#e8eaf6"><td colspan="7" style="font-weight:700;font-size:13px;padding:8px">
-            {t('到期','Expiry')}: <b>{exp_label}</b> ({t(f'约{months:.0f}个月', f'~{months:.0f} months')})</td></tr>'''
-        for p in pts:
-            if p['strike'] < ibex_now * 0.7 or p['strike'] > ibex_now * 1.05:
-                continue  # 只显示合理范围
+        # 只过滤合理范围的行权价
+        filtered = [p for p in pts if ibex_now * 0.7 <= p['strike'] <= ibex_now * 1.05]
+        if not filtered:
+            continue
+        # 找到推荐行的摘要（用于折叠标题）
+        atm_ask = next((p['ask'] for p in filtered if abs(p['strike'] - K_atm) < 51 and p.get('ask')), None)
+        otm_ask = next((p['ask'] for p in filtered if abs(p['strike'] - K_otm) < 51 and p.get('ask')), None)
+        summary_parts = []
+        if atm_ask:
+            summary_parts.append(f'ATM Ask €{atm_ask:,.0f}')
+        if otm_ask:
+            summary_parts.append(f'90%OTM Ask €{otm_ask:,.0f}')
+        summary = ' | '.join(summary_parts) if summary_parts else f'{len(filtered)} {t("个行权价","strikes")}'
+
+        tbl_rows = ''
+        for p in filtered:
             otm = (1 - p['strike']/ibex_now) * 100
-            # 高亮推荐行权价
             style = ''
             tag = ''
             if abs(p['strike'] - K_atm) < 51:
                 style = 'background:#e8f5e9;font-weight:600'
-                tag = f' <b style="color:#2e7d32">← ATM ({t("方案A","Plan A")})</b>'
+                tag = f' <b style="color:#2e7d32">← ATM</b>'
             elif abs(p['strike'] - K_otm) < 51:
                 style = 'background:#fff3e0;font-weight:600'
-                tag = f' <b style="color:#e65100">← 90%OTM ({t("推荐","Rec.")})</b>'
-
+                tag = f' <b style="color:#e65100">← 90%OTM</b>'
             bid_s = f'€{p["bid"]:,.0f}' if p['bid'] else '-'
             ask_s = f'€{p["ask"]:,.0f}' if p['ask'] else '-'
             spread_s = f'€{p["ask"]-p["bid"]:,.0f}' if p['bid'] and p['ask'] else '-'
             last_s = f'€{p["last"]:,.0f}' if p['last'] else '-'
-            liq = ''
-            if p['bid'] and p['ask']:
-                liq = '✓'
-            elif p['ask']:
-                liq = t('卖','Ask')
-            elif p['bid']:
-                liq = t('买','Bid')
-
-            rows_html += f'''<tr style="{style}">
+            liq = '✓' if p['bid'] and p['ask'] else (t('卖','Ask') if p['ask'] else (t('买','Bid') if p['bid'] else ''))
+            tbl_rows += f'''<tr style="{style}">
                 <td style="text-align:right">{p["strike"]:,.0f}</td>
                 <td style="text-align:right">{otm:.1f}%</td>
                 <td style="text-align:right;color:#2e7d32">{bid_s}</td>
@@ -712,31 +715,38 @@ def _build_live_chain_html(live, ibex_now, K_atm, K_otm):
                 <td style="text-align:right">{last_s}</td>
                 <td style="text-align:center">{liq}{tag}</td></tr>'''
 
+        panel_id = f'chain-panel-{idx}'
+        panels_html += f'''
+<details style="margin-bottom:8px;border:1px solid #ccc;border-radius:8px;overflow:hidden">
+  <summary style="padding:10px 14px;background:#f5f5f5;cursor:pointer;font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+    <span>{t('到期','Expiry')} <b>{exp_label}</b> ({t(f'约{months:.0f}个月',f'~{months:.0f} months')}) — {len(filtered)} {t('个行权价','strikes')}</span>
+    <span style="color:#1a237e;font-size:12px">{summary}</span>
+  </summary>
+  <div style="overflow-x:auto;padding:0">
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+  <thead><tr style="background:#1a237e;color:white">
+    <th style="padding:5px;text-align:right">Strike</th>
+    <th style="padding:5px;text-align:right">OTM%</th>
+    <th style="padding:5px;text-align:right;color:#a5d6a7">Bid</th>
+    <th style="padding:5px;text-align:right;color:#ef9a9a">Ask</th>
+    <th style="padding:5px;text-align:right">Spread</th>
+    <th style="padding:5px;text-align:right">Last</th>
+    <th style="padding:5px;text-align:center">{t('流动性','Liq.')}</th>
+  </tr></thead>
+  <tbody>{tbl_rows}</tbody>
+  </table></div>
+</details>'''
+
     return f'''
 <div class="section">
 <h2>{t('六B、MEFF 实时期权链','Section 6B: MEFF Live Option Chain')}</h2>
 <div class="alert a-warn" style="font-size:13px;margin-bottom:12px">
-  <b>{t('以下为MEFF交易所真实报价','Below are actual MEFF exchange quotes')}</b>({t('延迟约15分钟','~15 min delay')})
-  {t('。Bid=买入价(你卖出价)，Ask=卖出价(你买入价)。','。Bid=buy price (your sell price), Ask=sell price (your buy price).')}
-  {t('下单时以你的IBKR终端实时报价为准。','Use your IBKR terminal live quotes when placing orders.')}
+  <b>{t('以下为MEFF交易所真实报价','Below are actual MEFF exchange quotes')}</b>({t('延迟约15分钟','~15 min delay')})。
+  IBEX ≈ <b>{ibex_now:,.0f}</b> | ATM Strike ≈ <b>{K_atm:,}</b> | 90%OTM Strike ≈ <b>{K_otm:,}</b><br>
+  {t('Bid=买入价(你卖出价)，Ask=卖出价(你买入价)。下单时以IBKR终端实时报价为准。','Bid = buy price (your sell), Ask = sell price (your buy). Use IBKR terminal live quotes when placing orders.')}
 </div>
-<div style="overflow-x:auto">
-<table style="width:100%;border-collapse:collapse;font-size:13px">
-<thead>
-<tr style="background:#1a237e;color:white">
-  <th style="padding:6px;text-align:right">Strike</th>
-  <th style="padding:6px;text-align:right">OTM%</th>
-  <th style="padding:6px;text-align:right;color:#a5d6a7">Bid</th>
-  <th style="padding:6px;text-align:right;color:#ef9a9a">Ask</th>
-  <th style="padding:6px;text-align:right">Spread</th>
-  <th style="padding:6px;text-align:right">Last</th>
-  <th style="padding:6px;text-align:center">{t('流动性','Liquidity')}</th>
-</tr>
-</thead>
-<tbody>{rows_html}</tbody>
-</table>
-</div>
-<p style="font-size:11px;color:#888;margin-top:8px">{t('数据来源: MEFF官网实时行情页 | 乘数 €1/点 | 欧式期权','Source: MEFF live market page | Multiplier €1/pt | European style')}</p>
+{panels_html}
+<p style="font-size:11px;color:#888;margin-top:8px">{t('数据来源: MEFF官网实时行情页 | Mini IBEX | 乘数 €1/点 | 欧式期权','Source: MEFF live market page | Mini IBEX | Multiplier €1/pt | European style')}</p>
 </div>'''
 
 # ─── HTML ─────────────────────────────
