@@ -2,19 +2,20 @@ name: Daily Report Update
 
 on:
   schedule:
-    # 每个工作日3次采样：欧洲开盘前、午间、收盘后
-    - cron: '0 7 * * 1-5'    # UTC 07:00 (北京15:00, 欧洲开盘前)
+    # 每个工作日整点采样，4小时间隔（覆盖欧洲开盘→收盘）
+    - cron: '0 8 * * 1-5'    # UTC 08:00 (北京16:00, 欧洲开盘)
     - cron: '0 12 * * 1-5'   # UTC 12:00 (北京20:00, 欧洲午间)
-    - cron: '30 18 * * 1-5'  # UTC 18:30 (北京02:30, 欧洲收盘后)
+    - cron: '0 16 * * 1-5'   # UTC 16:00 (北京00:00, 欧洲收盘)
   workflow_dispatch:  # 允许手动触发
 
 concurrency:
   group: report-update
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -25,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install yfinance pandas numpy plotly
+        run: pip install -r requirements.txt
 
       - name: Generate report
         run: python3 hedge_final.py
@@ -40,5 +41,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add hedge_final.html docs/index.html docs/prices.json docs/premium_history.json docs/premium.html PTOPZWHM0007_daily_*.csv
           git diff --cached --quiet || git commit -m "auto: update report $(date -u +%Y-%m-%dT%H:%M)"
-          git pull --rebase || true
+          git pull --rebase
           git push

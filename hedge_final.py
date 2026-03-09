@@ -1,13 +1,14 @@
 """
-葡萄牙基金对冲方案 — 完整报告 v18
+葡萄牙基金对冲方案 — 完整报告 v20
+v20: 代码维护 — 4h整点快照/方案B损益图/yfinance兼容/MEFF到期月动态化/依赖锁定
+v19: 历史保费跟踪 + 对冲基金经理审阅反馈 + 多项风险披露增强
 v18: 审稿修正 — 标题动态化/24张推导补全/覆盖率描述修正/skew警告/滚仓成本量化
 v17: 条件Beta实证分析 + A/B方案切换 + 跌回买入点场景
 v16: 删除Collar方案，精简为两个纯Put方案(混合+纯OTM)
 v15: 混合行权价策略(ATM×8+OTM×20)，Event #11检测
-v10: 删除循环论证覆盖率，动态滚仓触发，Beta链独立回归说明
 """
 
-import os, sys, math
+import os, sys, math, tempfile
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -183,7 +184,8 @@ def fetch_meff_live_chain(ibex_now):
     url = 'https://www.meff.es/ing/Financial-Derivatives/Spreadsheet/FIEM_MiniIbex_35'
     try:
         # Step 1: GET获取VIEWSTATE
-        r = subprocess.run(['curl', '-sL', '-c', '/tmp/meff_cookies.txt',
+        _cookie_file = os.path.join(tempfile.gettempdir(), 'meff_cookies.txt')
+        r = subprocess.run(['curl', '-sL', '-c', _cookie_file,
             '-H', 'User-Agent: Mozilla/5.0', url],
             capture_output=True, text=True, timeout=20)
         vs = re.search(r'__VIEWSTATE" value="([^"]*)"', r.stdout)
@@ -191,12 +193,15 @@ def fetch_meff_live_chain(ibex_now):
         if not vs:
             return {}
         # Step 2: POST with full VIEWSTATE to get all expiration data
+        # 动态选择最远到期月（从GET页面中解析可用到期月）
+        avail_init = re.findall(r'value="(OPE\d+)"', r.stdout)
+        op_strike = max(avail_init) if avail_init else 'OPE20260918'
         post_data = urllib.parse.urlencode({
             '__VIEWSTATE': vs.group(1),
             '__VIEWSTATEGENERATOR': vsg.group(1) if vsg else '',
-            'OpStyle': 'E', 'OpType': 'P', 'OpStrike': 'OPE20260918'
+            'OpStyle': 'E', 'OpType': 'P', 'OpStrike': op_strike
         })
-        r2 = subprocess.run(['curl', '-sL', '-b', '/tmp/meff_cookies.txt',
+        r2 = subprocess.run(['curl', '-sL', '-b', _cookie_file,
             '-H', 'User-Agent: Mozilla/5.0',
             '-H', 'Content-Type: application/x-www-form-urlencoded',
             '-d', post_data, url], capture_output=True, text=True, timeout=20)
@@ -292,12 +297,14 @@ def load_data(live=None):
     fund = fund.sort_values('Date').reset_index(drop=True)
     from datetime import datetime, timedelta
     end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-    ibex = yf.download('^IBEX', start='2022-01-01', end=end_date, progress=False)
-    ibex.columns = [c[0] for c in ibex.columns]
+    ibex = yf.download('^IBEX', start='2022-01-01', end=end_date)
+    if isinstance(ibex.columns, pd.MultiIndex):
+        ibex.columns = [c[0] for c in ibex.columns]
     ibex = ibex.reset_index()[['Date','Close']].rename(columns={'Close':'ibex'})
     ibex['Date'] = ibex['Date'].dt.normalize()
-    psi = yf.download('PSI20.LS', start='2022-01-01', end=end_date, progress=False)
-    psi.columns = [c[0] for c in psi.columns]
+    psi = yf.download('PSI20.LS', start='2022-01-01', end=end_date)
+    if isinstance(psi.columns, pd.MultiIndex):
+        psi.columns = [c[0] for c in psi.columns]
     psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
     psi['Date'] = psi['Date'].dt.normalize()
     # 追加live数据到fund_df（内存中），确保事件检测覆盖最新交易日
@@ -1938,12 +1945,13 @@ def append_premium_snapshot(live, res, iv_points):
         p_atm=round(p_atm, 1), p_otm=round(p_otm, 1),
         expiry=live.get('best_put_expiry_label', '?'),
     )
-    # 去重：同一天同一小时不重复
-    ts_hour = snap['ts'][:13]  # 'YYYY-MM-DD HH'
-    history = [h for h in history if h.get('ts', '')[:13] != ts_hour]
+    # 去重：4小时窗口内不重复
+    snap_dt = datetime.strptime(snap['ts'], '%Y-%m-%d %H:%M')
+    from datetime import timedelta
+    history = [h for h in history if abs((datetime.strptime(h['ts'], '%Y-%m-%d %H:%M') - snap_dt).total_seconds()) >= 4 * 3600]
     history.append(snap)
     history.sort(key=lambda x: x['ts'])
-    with open(hist_path, 'w') as f:
+    with open(hist_path, 'w', encoding='utf-8') as f:
         _json.dump(history, f, ensure_ascii=False)
     print(f'  快照已记录: IBEX={ibex:.0f} IV_ATM={iv_atm}% BS_A=€{bs_a_raw} MEFF_A=€{meff_a or "N/A"}')
 
@@ -2181,26 +2189,32 @@ function showDetail(idx){
     kv(T('OTM行权价 ×24','OTM Strike ×24'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
     kv(T('BS理论价','BS Theory'), '€' + d.bs_b_raw.toLocaleString()) +
     kv('MEFF Ask', d.meff_b ? '€' + d.meff_b.toLocaleString() : 'N/A');
-  // Payoff chart
-  var xs=[],yFund=[],yHedged=[],yPut=[];
+  // Payoff chart (Plan A + Plan B)
+  var xs=[],yFund=[],yHedgedA=[],yHedgedB=[],yPutA=[],yPutB=[];
   var fv=d.fund_value, psi=d.psi, ibex=d.ibex, K=d.K_atm, K90=d.K_otm;
   var sigAtm=d.iv_atm/100, sigOtm=d.iv_otm/100, Texp=d.T_put;
-  var prem = d.meff_a || d.bs_a_raw;
+  var premA = d.meff_a || d.bs_a_raw;
+  var premB = d.meff_b || d.bs_b_raw;
   for(var p=5000;p<=11000;p+=100){
     var pDrop=(p-psi)/psi;
     var fundEst=fv*(1+PARAMS.betaFP*pDrop);
     var ibexEst=ibex*(1+PARAMS.betaIP*pDrop);
-    var putPay=Math.max(K-ibexEst,0)*8+Math.max(K90-ibexEst,0)*20;
+    var putPayA=Math.max(K-ibexEst,0)*8+Math.max(K90-ibexEst,0)*20;
+    var putPayB=Math.max(K90-ibexEst,0)*24;
     xs.push(p); yFund.push(Math.round(fundEst));
-    yHedged.push(Math.round(fundEst+putPay-prem));
-    yPut.push(Math.round(putPay));
+    yHedgedA.push(Math.round(fundEst+putPayA-premA));
+    yHedgedB.push(Math.round(fundEst+putPayB-premB));
+    yPutA.push(Math.round(putPayA));
+    yPutB.push(Math.round(putPayB));
   }
   Plotly.newPlot('detail-payoff',[
     {x:xs,y:yFund,name:T('不对冲','Unhedged'),line:{color:'#c62828',width:2,dash:'dot'}},
-    {x:xs,y:yHedged,name:T('方案A对冲后','Plan A Hedged'),line:{color:'#2e7d32',width:3}},
-    {x:xs,y:yPut,name:T('Put赔付','Put Payout'),line:{color:'#1565c0',width:1.5,dash:'dash'},yaxis:'y2'}
+    {x:xs,y:yHedgedA,name:T('方案A对冲后','Plan A Hedged'),line:{color:'#2e7d32',width:3}},
+    {x:xs,y:yHedgedB,name:T('方案B对冲后','Plan B Hedged'),line:{color:'#ff8f00',width:2.5}},
+    {x:xs,y:yPutA,name:T('方案A赔付','Plan A Payout'),line:{color:'#1565c0',width:1.5,dash:'dash'},yaxis:'y2'},
+    {x:xs,y:yPutB,name:T('方案B赔付','Plan B Payout'),line:{color:'#e65100',width:1.5,dash:'dash'},yaxis:'y2'}
   ],{
-    template:'plotly_white',height:280,
+    template:'plotly_white',height:320,
     xaxis:{title:'PSI20'},
     yaxis:{title:T('基金市值(EUR)','Fund Value(EUR)'),tickformat:','},
     yaxis2:{title:T('赔付','Payout'),overlaying:'y',side:'right',tickformat:',',showgrid:false},
@@ -2350,9 +2364,10 @@ def main():
     docs_dir = os.path.join(DATA_DIR, 'docs')
     if os.path.isdir(docs_dir):
         pj = os.path.join(docs_dir, 'prices.json')
-        with open(pj, 'w') as f: f.write(prices_json)
+        with open(pj, 'w', encoding='utf-8') as f: f.write(prices_json)
         print(f'→ {pj}')
     import subprocess, platform
-    if platform.system() == 'Darwin': subprocess.run(['open', out])
+    if platform.system() == 'Darwin' and not os.environ.get('CI'):
+        subprocess.run(['open', out])
 
 if __name__ == '__main__': main()
