@@ -315,20 +315,27 @@ def update_csv_with_live(live):
 def load_data(live=None):
     fund = pd.read_csv(os.path.join(DATA_DIR, 'PTOPZWHM0007_daily_2022-2026.csv'), parse_dates=['Date'])
     fund = fund.sort_values('Date').reset_index(drop=True)
-    from datetime import datetime, timedelta
     end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-    ibex = yf.download('^IBEX', start='2022-01-01', end=end_date)
-    if isinstance(ibex.columns, pd.MultiIndex):
-        ibex.columns = [c[0] for c in ibex.columns]
-    ibex = ibex.reset_index()[['Date','Close']].rename(columns={'Close':'ibex'})
-    ibex['Date'] = ibex['Date'].dt.normalize()
-    psi = yf.download('PSI20.LS', start='2022-01-01', end=end_date)
-    if isinstance(psi.columns, pd.MultiIndex):
-        psi.columns = [c[0] for c in psi.columns]
-    psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
-    psi['Date'] = psi['Date'].dt.normalize()
+    try:
+        ibex = yf.download('^IBEX', start='2022-01-01', end=end_date)
+        if isinstance(ibex.columns, pd.MultiIndex):
+            ibex.columns = [c[0] for c in ibex.columns]
+        ibex = ibex.reset_index()[['Date','Close']].rename(columns={'Close':'ibex'})
+        ibex['Date'] = ibex['Date'].dt.normalize()
+    except Exception as e:
+        print(f'  WARNING: IBEX download failed: {e}')
+        ibex = pd.DataFrame(columns=['Date','ibex'])
+    try:
+        psi = yf.download('PSI20.LS', start='2022-01-01', end=end_date)
+        if isinstance(psi.columns, pd.MultiIndex):
+            psi.columns = [c[0] for c in psi.columns]
+        psi = psi.reset_index()[['Date','Close']].rename(columns={'Close':'psi'})
+        psi['Date'] = psi['Date'].dt.normalize()
+    except Exception as e:
+        print(f'  WARNING: PSI download failed: {e}')
+        psi = pd.DataFrame(columns=['Date','psi'])
     # 追加live数据到fund_df（内存中），确保事件检测覆盖最新交易日
-    if live and 'fund_nav' in live and 'fund_date' in live:
+    if live and 'fund_nav' in live and live.get('fund_date', '?') != '?':
         live_dt = pd.Timestamp(live['fund_date'])
         if fund['Date'].iloc[-1] < live_dt:
             live_row = pd.DataFrame({'Date': [live_dt], 'Close': [live['fund_nav']]})
@@ -336,6 +343,20 @@ def load_data(live=None):
                 if col not in live_row.columns:
                     live_row[col] = np.nan
             fund = pd.concat([fund, live_row], ignore_index=True)
+    # Fund NAV 延迟时，用最后已知NAV forward fill到IBEX最新日期（保证图表不截断）
+    if len(ibex) > 0 and len(fund) > 0:
+        fund_last = fund['Date'].iloc[-1]
+        ibex_last = ibex['Date'].iloc[-1]
+        if ibex_last > fund_last:
+            extra_dates = ibex[ibex['Date'] > fund_last]['Date']
+            last_nav = fund['Close'].iloc[-1]
+            extra_rows = pd.DataFrame({'Date': extra_dates.values, 'Close': last_nav})
+            for col in fund.columns:
+                if col not in extra_rows.columns:
+                    extra_rows[col] = np.nan
+            fund = pd.concat([fund, extra_rows], ignore_index=True)
+            n_filled = len(extra_dates)
+            print(f'  基金NAV延迟{(ibex_last-fund_last).days}天，forward fill {n_filled}个交易日(NAV={last_nav:.2f})')
     return fund, ibex, psi
 
 def find_weekly_drops(df, threshold=-3.0):
@@ -1916,7 +1937,6 @@ buildChain({ibex_now}, {rec['K']}, {K_90});
 def append_premium_snapshot(live, res, iv_points):
     """每次运行追加一条快照到 premium_history.json"""
     import json as _json
-    from datetime import datetime
     docs_dir = os.path.join(DATA_DIR, 'docs')
     hist_path = os.path.join(docs_dir, 'premium_history.json')
     history = []
@@ -1926,7 +1946,10 @@ def append_premium_snapshot(live, res, iv_points):
                 history = _json.load(f)
         except Exception:
             history = []
-    ibex = live['ibex']
+    ibex = live.get('ibex')
+    if not ibex or not live.get('psi'):
+        print('  快照跳过：缺少关键价格数据')
+        return
     T_put = live.get('best_put_T', 1.0)
     K_atm = round(ibex / 50) * 50
     K_otm = round(ibex * 0.90 / 50) * 50
@@ -1943,6 +1966,8 @@ def append_premium_snapshot(live, res, iv_points):
     best_code = live.get('best_put_expiry_code')
     if best_code and chain_data.get('chains', {}).get(best_code):
         for p in chain_data['chains'][best_code]:
+            if not isinstance(p, dict) or 'strike' not in p:
+                continue
             if abs(p['strike'] - K_atm) < 51 and p.get('ask'):
                 meff_atm_ask = p['ask']
             if abs(p['strike'] - K_otm) < 51 and p.get('ask'):
@@ -2328,15 +2353,20 @@ def main():
         total = sum(len(v) for v in chain_data['chains'].values())
         put_exps = [k for k in chain_data['chains'] if k.startswith('OPE')]
         print(f'  {len(put_exps)}个到期月, 共{total}个报价')
-        # 找最长的Put到期月，计算真实T
+        # 找最长且有实际报价(bid/ask)的Put到期月
         best_code, best_date, best_days = None, None, 0
         for code in put_exps:
             try:
                 exp = datetime.strptime(code[3:], '%Y%m%d')
                 d = (exp - datetime.now()).days
-                if d > best_days:
+                if d <= 0:
+                    continue
+                # 检查这个到期月是否有实际ask报价
+                has_quotes = any(p.get('ask') for p in chain_data['chains'].get(code, [])
+                                 if isinstance(p, dict))
+                if d > best_days and has_quotes:
                     best_code, best_date, best_days = code, exp, d
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
         if best_code:
             live['best_put_expiry_code'] = best_code
@@ -2345,8 +2375,10 @@ def main():
             live['best_put_T'] = round(best_days / 365, 3)
             print(f'  最长Put到期: {live["best_put_expiry_label"]} (T={live["best_put_T"]:.2f}年, {best_days}天)')
     else:
-        print('  实时期权链抓取失败')
+        print('  实时期权链抓取失败，使用默认T=1.0年')
         live['meff_chain'] = {}
+        live['best_put_T'] = 1.0
+        live['best_put_expiry_label'] = 'N/A'
 
     # 将live NAV写入CSV，避免数据缺口
     update_csv_with_live(live)
