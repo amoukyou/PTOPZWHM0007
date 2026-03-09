@@ -9,10 +9,30 @@ v15: 混合行权价策略(ATM×8+OTM×20)，Event #11检测
 """
 
 import os, sys, math, tempfile
+from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import plotly.graph_objects as go
+
+# 马德里时区（MEFF所在地，CET/CEST自动切换）
+def _madrid_now():
+    """返回马德里当前时间（含夏令时切换）"""
+    utc = datetime.now(timezone.utc)
+    # CET=UTC+1, CEST=UTC+2 (3月最后一个周日→10月最后一个周日)
+    year = utc.year
+    # 3月最后一个周日
+    mar31 = datetime(year, 3, 31, tzinfo=timezone.utc)
+    dst_start = mar31 - timedelta(days=(mar31.weekday() + 1) % 7)
+    dst_start = dst_start.replace(hour=1)
+    # 10月最后一个周日
+    oct31 = datetime(year, 10, 31, tzinfo=timezone.utc)
+    dst_end = oct31 - timedelta(days=(oct31.weekday() + 1) % 7)
+    dst_end = dst_end.replace(hour=1)
+    if dst_start <= utc < dst_end:
+        return utc + timedelta(hours=2)  # CEST
+    else:
+        return utc + timedelta(hours=1)  # CET
 
 sys.stdout.reconfigure(encoding='utf-8')
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1933,7 +1953,7 @@ def append_premium_snapshot(live, res, iv_points):
     iv_atm = round(interp_iv(K_atm, iv_points) * 100, 1)
     iv_otm = round(interp_iv(K_otm, iv_points) * 100, 1)
     snap = dict(
-        ts=datetime.now().strftime('%Y-%m-%d %H:%M'),
+        ts=_madrid_now().strftime('%Y-%m-%d %H:%M'),
         ibex=round(ibex), psi=round(live['psi']),
         fund_nav=round(live['fund_nav'], 2), fund_value=live['fund_value'],
         K_atm=K_atm, K_otm=K_otm, T_put=round(T_put, 3),
@@ -2263,7 +2283,7 @@ def main():
     ibex_now = prices.get('ibex', 17062)
     estx_now = prices.get('estx', 6138)
     fund_value = round(fund_nav * FUND_UNITS)
-    gen_time = datetime.now().strftime('%Y-%m-%d %H:%M')
+    gen_time = _madrid_now().strftime('%Y-%m-%d %H:%M') + ' (Madrid)'
     fund_src = prices.get('fund_src', 'Yahoo Finance')
     # 计算NAV滞后天数（工作日口径）
     fund_lag = 0
