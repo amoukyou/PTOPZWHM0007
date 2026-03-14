@@ -1245,13 +1245,14 @@ body.lang-zh .en{{display:none}}
     | r={ECB_RATE*100:.1f}% | T={T_put:.2f}yr | {t('到期','Expiry')} {live.get('best_put_expiry_date', live.get('meff_expiry','?'))} {t('（MEFF合约代码精确日期，第三个周五到期；选最接近1年的月份）','(precise date from MEFF contract code, expires 3rd Friday; nearest ~1yr expiry)')}
   </span>
 </div>
-{'<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">' +
-  '<b>' + t('MEFF 实盘价格（Mar-27 结算价）','MEFF Settlement Prices (Mar-27)') + '</b><br>' +
-  ' &middot; '.join(f'K={p["strike"]:,} | Close=€{p["close"]} | IV={p["iv"]*100:.1f}%' for p in _meff_iv_points if p.get("close", 0) > 0) +
-  '<br><b>ATM K=' + f'{K:,}' + '</b>: ' + src_atm + f' €{p_atm_meff}/张 | ' +
-  '<b>90%OTM K=' + f'{K_90:,}' + '</b>: ' + src_otm + f' €{p_otm_meff}/张<br>' +
-  t('方案A','Plan A') + f'(×8+×20)=€{meff_a_cost:,} | ' + t('方案B','Plan B') + f'(×24)=€{meff_b_cost:,}' +
-  '</div>' if any(p.get('close', 0) > 0 for p in _meff_iv_points) else ''}
+{''.join([
+  f'<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">',
+  f'<b>&#128202; MEFF 实盘价格（{live.get("meff_expiry","?")} 结算价）</b><br>',
+  ' &middot; '.join(f'K={p["strike"]:,} | Close=&#8364;{p["close"]:,.0f} | IV={p["iv"]*100:.1f}%' for p in _meff_iv_points if p.get("close", 0) > 0),
+  f'<br><b>ATM K={K:,}</b>: {src_atm} &#8364;{p_atm_meff:,.0f}/张 | <b>90%OTM K={K_90:,}</b>: {src_otm} &#8364;{p_otm_meff:,.0f}/张<br>',
+  f'方案A(ATM×8+OTM×20)=<b>&#8364;{meff_a_cost:,}</b> | 方案B(OTM×24)=<b>&#8364;{meff_b_cost:,}</b>',
+  '</div>',
+]) if any(p.get('close', 0) > 0 for p in _meff_iv_points) else ''}
 <table id="option-chain-table" style="font-size:13px">
   <tr>
     <th>{t('行权价','Strike')}</th>
@@ -1615,6 +1616,7 @@ var P = {{
   betaFI: {BETA_FUND_IBEX}, betaFP: {BETA_FUND_PSI}, betaIP: {BETA_IBEX_PSI},
   iv: {IBEX_IMPLIED_VOL}, r: {ECB_RATE}, initInv: {INITIAL_INV}, psiEntry: {PSI20_ENTRY_ACT},
   avgCR: {avg_crash_ratio}, fundNav: {fund_nav}, fundUnits: {FUND_UNITS}, Tput: {T_put},
+  meffA: {meff_a_cost}, meffB: {meff_b_cost},
   meffPts: {str([dict(strike=p['strike'], iv=p['iv']) for p in _meff_iv_points]) if _meff_iv_points else '[]'}
 }};
 function interpIv(K) {{
@@ -1943,8 +1945,9 @@ function recalcAll() {{
   var pAtm = bsPutAuto(ibex, K, P.Tput, P.r);
   var pOtm = bsPutAuto(ibex, K90, P.Tput, P.r);
 
-  var premARaw = Math.round(pAtm * 8 + pOtm * 20);  // 单轮保费
-  var premBRaw = Math.round(pOtm * 24);
+  // 优先用 MEFF 实盘结算价，没有时 fallback 到 BS
+  var premARaw = (P.meffA > 0) ? P.meffA : Math.round(pAtm * 8 + pOtm * 20);
+  var premBRaw = (P.meffB > 0) ? P.meffB : Math.round(pOtm * 24);
   var annFactor = P.Tput > 0 ? 1.0 / P.Tput : 1.0;
   var premA = Math.round(premARaw * annFactor);  // 年化保费
   var premB = Math.round(premBRaw * annFactor);
