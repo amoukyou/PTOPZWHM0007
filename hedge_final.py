@@ -198,6 +198,39 @@ def interp_iv(strike, iv_points, fallback=IBEX_IMPLIED_VOL):
             return pts[j]['iv'] * (1 - t) + pts[j+1]['iv'] * t
     return fallback
 
+def interp_meff_close(K, iv_points, ibex_now, fallback_T=1.0):
+    """用MEFF日报结算价(close)插值期权价格。先剥离内在价值，对时间价值线性插值，再加回目标K的内在价值。"""
+    pts = sorted([p for p in (iv_points or []) if p.get('close', 0) > 0], key=lambda p: p['strike'])
+    if not pts:
+        return (bs_put(ibex_now, K, fallback_T), "BS估算")
+    if len(pts) == 1:
+        # 单点：直接用该点的时间价值 + 目标K的内在价值
+        tv = pts[0]['close'] - max(pts[0]['strike'] - ibex_now, 0)
+        price = max(tv, 0) + max(K - ibex_now, 0)
+        return (round(price, 1), "MEFF插值")
+    # 提取时间价值
+    strikes = [p['strike'] for p in pts]
+    tvs = [p['close'] - max(p['strike'] - ibex_now, 0) for p in pts]
+    # 精确命中
+    for i, s in enumerate(strikes):
+        if s == K:
+            return (pts[i]['close'], "MEFF实盘")
+    # 线性插值/外推时间价值
+    if K <= strikes[0]:
+        slope = (tvs[1] - tvs[0]) / (strikes[1] - strikes[0])
+        tv_interp = tvs[0] + slope * (K - strikes[0])
+    elif K >= strikes[-1]:
+        slope = (tvs[-1] - tvs[-2]) / (strikes[-1] - strikes[-2])
+        tv_interp = tvs[-1] + slope * (K - strikes[-1])
+    else:
+        for j in range(len(strikes) - 1):
+            if strikes[j] <= K <= strikes[j+1]:
+                frac = (K - strikes[j]) / (strikes[j+1] - strikes[j])
+                tv_interp = tvs[j] * (1 - frac) + tvs[j+1] * frac
+                break
+    price = max(tv_interp, 0) + max(K - ibex_now, 0)
+    return (round(price, 1), "MEFF插值")
+
 def fetch_meff_live_chain(ibex_now):
     """从MEFF官网抓取Mini IBEX Put期权链实时bid/ask报价（15分钟延迟）"""
     import re, subprocess, urllib.parse
@@ -417,6 +450,14 @@ def analyze(fund_df, ibex_df, psi_df, live):
     # 使用MEFF实际最长Put到期期限，没有实时数据时fallback到1年
     T_put = live.get('best_put_T', 1.0)
 
+    # MEFF close 插值价格（日报结算价）
+    K_atm_candidate = round(ibex_now / 50) * 50
+    K_otm_candidate = round(ibex_now * 0.90 / 50) * 50
+    p_atm_meff, src_atm = interp_meff_close(K_atm_candidate, _meff_iv_points, ibex_now)
+    p_otm_meff, src_otm = interp_meff_close(K_otm_candidate, _meff_iv_points, ibex_now)
+    meff_a_cost = round(p_atm_meff * 8 + p_otm_meff * 20)
+    meff_b_cost = round(p_otm_meff * 24)
+
     df = pd.merge(fund_df[['Date','Close']].rename(columns={'Close':'fund'}),
                   ibex_df, on='Date', how='inner').sort_values('Date').reset_index(drop=True)
     events = find_weekly_drops(df)
@@ -533,7 +574,10 @@ def analyze(fund_df, ibex_df, psi_df, live):
                 rec_prem_raw=rec_prem_raw, planb_prem_raw=planb_prem_raw,
                 T_months=T_months, annual_factor=annual_factor,
                 avg_crash_ratio=avg_crash_ratio, crash_ratios=crash_ratios,
-                entry_scenario=entry_scenario)
+                entry_scenario=entry_scenario,
+                p_atm_meff=round(p_atm_meff, 1), p_otm_meff=round(p_otm_meff, 1),
+                src_atm=src_atm, src_otm=src_otm,
+                meff_a_cost=meff_a_cost, meff_b_cost=meff_b_cost)
 
 # ─── Charts ──────────────────────────────
 def chart_fund_psi_ibex(fund_df, psi_df, ibex_df, live):
@@ -835,6 +879,13 @@ def generate_html(fund_df, psi_df, res, live):
     K = rec['K']
     T_put = rec.get('T', 1.0)
     put_expiry_label = live.get('best_put_expiry_label', '2027-03')
+    # MEFF close 插值价格
+    p_atm_meff = res.get('p_atm_meff', rec['price'])
+    p_otm_meff = res.get('p_otm_meff', round(bs_put(live['ibex'], K_90, T_put), 1))
+    src_atm = res.get('src_atm', 'BS')
+    src_otm = res.get('src_otm', 'BS')
+    meff_a_cost = res.get('meff_a_cost', rec_prem_raw)
+    meff_b_cost = res.get('meff_b_cost', planb_prem_raw)
     fv = live['fund_value']
     fund_nav = live['fund_nav']
     psi_now = live['psi']
@@ -1114,7 +1165,7 @@ body.lang-zh .en{{display:none}}
 
 <div class="alert a-note" style="font-size:14px;line-height:1.8;border:2px solid #7b1fa2;border-radius:12px;padding:16px 20px">
   <b style="font-size:16px;color:#4a148c">{t('一分钟决策摘要','1-Minute Decision Summary')}</b><br>
-  <b>{t('花多少钱','Cost')}</b>{t('：',': ')}<b style="color:#c62828">{f"€{round(_real_atm_ask*8+_real_otm_ask*20):,}" if _real_atm_ask and _real_otm_ask else f"€{rec_prem_raw:,}"}</b>{t(f'/{T_months}个月（方案A）或',f'/{T_months}mo (Plan A) or ')}<b style="color:#c62828">{f"€{round(_real_otm_ask*24):,}" if _real_otm_ask else f"€{planb_prem_raw:,}"}</b>{t(f'/{T_months}个月（方案B，只防崩盘）',f'/{T_months}mo (Plan B, crash-only)')}<br>
+  <b>{t('花多少钱','Cost')}</b>{t('：',': ')}<b style="color:#c62828">&euro;{meff_a_cost:,}</b>{t(f'/{T_months}个月（方案A）或',f'/{T_months}mo (Plan A) or ')}<b style="color:#c62828">&euro;{meff_b_cost:,}</b>{t(f'/{T_months}个月（方案B，只防崩盘）',f'/{T_months}mo (Plan B, crash-only)')} <span style="font-size:11px;color:#888">({src_atm})</span><br>
   <b>{t('保什么','Protects')}</b>{t('：IBEX暴跌>10%时赔付，覆盖基金约40-57%的<b>IBEX相关损失</b>（R&sup2;=42%）',': Payout when IBEX drops >10%, covering ~40-57% of <b>IBEX-related losses</b> (R&sup2;=42%)')}<br>
   <b>{t('不保什么','Does NOT protect')}</b>{t('：基金自身风险（总风险的58%）、小跌（方案B <10%不赔）、先涨后跌场景（Put行权价被甩开）',': Fund-specific risk (58% of total), small drops (Plan B: no payout <10%), rally-then-crash (strike left behind)')}<br>
   <span style="display:flex;gap:8px;margin-top:6px">
@@ -1194,6 +1245,13 @@ body.lang-zh .en{{display:none}}
     | r={ECB_RATE*100:.1f}% | T={T_put:.2f}yr | {t('到期','Expiry')} {live.get('best_put_expiry_date', live.get('meff_expiry','?'))} {t('（MEFF合约代码精确日期，第三个周五到期；选最接近1年的月份）','(precise date from MEFF contract code, expires 3rd Friday; nearest ~1yr expiry)')}
   </span>
 </div>
+{'<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px">' +
+  '<b>' + t('MEFF 实盘价格（Mar-27 结算价）','MEFF Settlement Prices (Mar-27)') + '</b><br>' +
+  ' &middot; '.join(f'K={p["strike"]:,} | Close=€{p["close"]} | IV={p["iv"]*100:.1f}%' for p in _meff_iv_points if p.get("close", 0) > 0) +
+  '<br><b>ATM K=' + f'{K:,}' + '</b>: ' + src_atm + f' €{p_atm_meff}/张 | ' +
+  '<b>90%OTM K=' + f'{K_90:,}' + '</b>: ' + src_otm + f' €{p_otm_meff}/张<br>' +
+  t('方案A','Plan A') + f'(×8+×20)=€{meff_a_cost:,} | ' + t('方案B','Plan B') + f'(×24)=€{meff_b_cost:,}' +
+  '</div>' if any(p.get('close', 0) > 0 for p in _meff_iv_points) else ''}
 <table id="option-chain-table" style="font-size:13px">
   <tr>
     <th>{t('行权价','Strike')}</th>
@@ -1262,9 +1320,9 @@ body.lang-zh .en{{display:none}}
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv">{f'<span style="color:#c62828">€{round(_real_atm_ask*8+_real_otm_ask*20):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem-raw">&euro;{rec_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask ({_meff_ask_expiry_label or "?"}) | BS理论: €{rec_prem_raw:,}' if _real_atm_ask and _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
-    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv">{f'<span style="color:#c62828">€{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem">&euro;{rec_prem:,}</span>'}</div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span>{f' | BS: €{rec_prem:,}/yr' if _real_atm_ask and _real_otm_ask else ''}</div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}</div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv"><span style="color:#c62828" id="dyn-pa-prem-raw">&euro;{meff_a_cost:,}</span></div><div style="font-size:10px;color:#888">{src_atm} €{p_atm_meff}/{t('张','ct')} | {src_otm} €{p_otm_meff}/{t('张','ct')} | {t('MEFF日报结算价','MEFF Daily Settlement')}{f' | BS理论: €{rec_prem_raw:,}' if meff_a_cost != rec_prem_raw else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv"><span style="color:#c62828" id="dyn-pa-prem">&euro;{round(meff_a_cost*annual_factor):,}</span></div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pa-prem-pct">{round(meff_a_cost*annual_factor)/fv*100:.2f}%</span>{f' | BS: €{rec_prem:,}/yr' if meff_a_cost != rec_prem_raw else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{round(meff_a_cost*annual_factor)*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}{f' | BS: €{rec_prem*5:,}' if meff_a_cost != rec_prem_raw else ''}</div></div>
     <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
   </div>
 </div>
@@ -1315,9 +1373,9 @@ body.lang-zh .en{{display:none}}
   <h3 style="color:#e65100">{t(f'纯90%OTM Put &times;24，{T_months}个月滚仓 + 动态滚仓',f'Pure 90%OTM Put &times;24, {T_months}-Month Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem-raw">&euro;{planb_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask ({_meff_ask_expiry_label or "?"}) | BS理论: €{planb_prem_raw:,}' if _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
-    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24*annual_factor):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem">&euro;{planb_prem:,}</span>'}</div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span>{f' | BS: €{planb_prem:,}/yr' if _real_otm_ask else ''}</div></div>
-    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}</div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*annual_factor*5):,}</div>' if _real_otm_ask else ''}</div>
+    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv" style="color:#e65100"><span style="color:#c62828" id="dyn-pb-prem-raw">&euro;{meff_b_cost:,}</span></div><div style="font-size:10px;color:#888">{src_otm} €{p_otm_meff}/{t('张','ct')} ×24 | {t('MEFF日报结算价','MEFF Daily Settlement')}{f' | BS理论: €{planb_prem_raw:,}' if meff_b_cost != planb_prem_raw else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv" style="color:#e65100"><span style="color:#c62828" id="dyn-pb-prem">&euro;{round(meff_b_cost*annual_factor):,}</span></div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pb-prem-pct">{round(meff_b_cost*annual_factor)/fv*100:.2f}%</span>{f' | BS: €{planb_prem:,}/yr' if meff_b_cost != planb_prem_raw else ''}</div></div>
+    <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{round(meff_b_cost*annual_factor)*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}{f' | BS: €{planb_prem*5:,}' if meff_b_cost != planb_prem_raw else ''}</div></div>
     <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-save">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</span></div></div>
     <div class="rec-item"><div class="rl">{t('代价','Trade-off')}</div><div class="rv" style="color:#c62828;font-size:16px">{t('10%以内跌幅不赔','No payout for drops under 10%')}</div></div>
   </div>
@@ -1985,6 +2043,11 @@ def append_premium_snapshot(live, res, iv_points):
     # IV at ATM and OTM
     iv_atm = round(interp_iv(K_atm, iv_points) * 100, 1)
     iv_otm = round(interp_iv(K_otm, iv_points) * 100, 1)
+    # MEFF close 插值价格
+    p_atm_mc, src_atm_snap = interp_meff_close(K_atm, iv_points, ibex)
+    p_otm_mc, src_otm_snap = interp_meff_close(K_otm, iv_points, ibex)
+    meff_close_a = round(p_atm_mc * 8 + p_otm_mc * 20)
+    meff_close_b = round(p_otm_mc * 24)
     snap = dict(
         ts=_madrid_now().strftime('%Y-%m-%d %H:%M'),
         ibex=round(ibex), psi=round(live['psi']),
@@ -1996,6 +2059,8 @@ def append_premium_snapshot(live, res, iv_points):
         bs_a_1yr=bs_a_1yr, bs_b_1yr=bs_b_1yr,
         meff_a=meff_a, meff_b=meff_b,
         meff_atm_ask=meff_atm_ask, meff_otm_ask=meff_otm_ask,
+        meff_close_a=meff_close_a, meff_close_b=meff_close_b,
+        src_atm=src_atm_snap, src_otm=src_otm_snap,
         p_atm=round(p_atm, 1), p_otm=round(p_otm, 1),
         expiry=live.get('best_put_expiry_label', '?'),
     )
@@ -2153,9 +2218,9 @@ function renderCharts(){
   });
 
   // ═══ 顶部摘要卡片 ═══
-  var latCostA = latest.meff_a || latest.bs_a_raw;
-  var latCostB = latest.meff_b || latest.bs_b_raw;
-  var src = latest.meff_a ? 'MEFF Ask' : 'BS';
+  var latCostA = latest.meff_close_a || latest.bs_a_1yr || latest.bs_a_raw;
+  var latCostB = latest.meff_close_b || latest.bs_b_1yr || latest.bs_b_raw;
+  var src = latest.meff_close_a ? (latest.src_atm || 'MEFF') : (latest.meff_a ? 'MEFF Ask' : 'BS');
   var ivSig = latest.iv_atm < 16 ? 'sig-low' : (latest.iv_atm > 20 ? 'sig-hi' : 'sig-mid');
   var ivWord = latest.iv_atm < 16 ? T('低位','Low') : (latest.iv_atm > 20 ? T('偏高','High') : T('正常','Normal'));
   document.getElementById('summary-cards').innerHTML =
@@ -2237,12 +2302,14 @@ function showDetail(idx){
     kv(T('ATM行权价 ×8','ATM Strike ×8'), d.K_atm.toLocaleString() + ' (€' + d.p_atm + T('/张','/ct') + ')') +
     kv(T('OTM行权价 ×20','OTM Strike ×20'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
     kv(T('BS理论价','BS Theory'), '€' + d.bs_a_raw.toLocaleString()) +
-    kv('MEFF Ask', d.meff_a ? '€' + d.meff_a.toLocaleString() : 'N/A');
+    kv('MEFF Ask', d.meff_a ? '€' + d.meff_a.toLocaleString() : 'N/A') +
+    kv(T('MEFF结算价','MEFF Settlement'), d.meff_close_a ? '€' + d.meff_close_a.toLocaleString() + ' (' + (d.src_atm||'') + ')' : 'N/A');
   // Plan B
   document.getElementById('detail-plan-b').innerHTML =
     kv(T('OTM行权价 ×24','OTM Strike ×24'), d.K_otm.toLocaleString() + ' (€' + d.p_otm + T('/张','/ct') + ')') +
     kv(T('BS理论价','BS Theory'), '€' + d.bs_b_raw.toLocaleString()) +
-    kv('MEFF Ask', d.meff_b ? '€' + d.meff_b.toLocaleString() : 'N/A');
+    kv('MEFF Ask', d.meff_b ? '€' + d.meff_b.toLocaleString() : 'N/A') +
+    kv(T('MEFF结算价','MEFF Settlement'), d.meff_close_b ? '€' + d.meff_close_b.toLocaleString() + ' (' + (d.src_otm||'') + ')' : 'N/A');
   // Payoff chart (Plan A + Plan B)
   var xs=[],yFund=[],yHedgedA=[],yHedgedB=[],yPutA=[],yPutB=[];
   var fv=d.fund_value, psi=d.psi, ibex=d.ibex, K=d.K_atm, K90=d.K_otm;
