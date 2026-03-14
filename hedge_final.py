@@ -1191,7 +1191,7 @@ body.lang-zh .en{{display:none}}
   <span style="font-size:14px;font-weight:700;color:#1a237e">{t('IBEX35 Put 期权定价参考','IBEX35 Put Pricing Reference')}</span>
   <span style="font-size:11px;color:{'#2e7d32' if live.get('meff_source')=='MEFF' else '#aaa'}">
     {'MEFF ' + t('实盘IV插值','market IV interpolated') + ' (' + live.get('meff_expiry','?') + ', ' + str(len(live.get('meff_points',[]))) + t('个数据点',' data points') + ')' if live.get('meff_source')=='MEFF' else 'BS ' + t('理论价','theoretical') + ' | IV=' + str(IBEX_IMPLIED_VOL*100) + '%'}
-    | r={ECB_RATE*100:.1f}% | T={T_put:.2f}yr | {t('到期','Expiry')} {live.get('meff_expiry','2027-03')}
+    | r={ECB_RATE*100:.1f}% | T={T_put:.2f}yr | {t('到期','Expiry')} {live.get('meff_expiry','2027-03')} {t('（选最接近1年的月份，theta成本最优）','(nearest ~1yr expiry, optimal theta cost)')}
   </span>
 </div>
 <table id="option-chain-table" style="font-size:13px">
