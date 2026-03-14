@@ -1566,7 +1566,7 @@ function showTab(i){{
 if(Z[0]){{Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{{responsive:true}});document.getElementById('zoom_0').dataset.r='1'}}
 // Countdown since generation
 (function(){{
-  var gen=new Date('{gen_time.replace(" ","T")}:00');
+  var gen=new Date('{gen_time.split(" (")[0].replace(" ","T")}:00');
   var el=document.getElementById('timer');
   function tick(){{
     var now=new Date();var d=Math.floor((now-gen)/1000);
