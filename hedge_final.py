@@ -861,7 +861,10 @@ def generate_html(fund_df, psi_df, res, live):
                     best_code, best_diff = code, diff
             except ValueError:
                 continue
+        _meff_ask_expiry_label = None
         if best_code:
+            _meff_ask_expiry_label = chain_data.get('labels', {}).get(
+                best_code, best_code[3:11])  # fallback: OPE20270321 → 20270321
             pts = chain_data['chains'][best_code]
             for p in pts:
                 if abs(p['strike'] - K) < 51 and p.get('ask'):
@@ -1259,7 +1262,7 @@ body.lang-zh .en{{display:none}}
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('ATM行权价','ATM Strike')}</div><div class="rv"><span id="dyn-pa-atm-k">{rec['K']:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;8{t('张',' contracts')}</div></div>
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv"><span id="dyn-pa-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;20{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv">{f'<span style="color:#c62828">€{round(_real_atm_ask*8+_real_otm_ask*20):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem-raw">&euro;{rec_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask | BS理论: €{rec_prem_raw:,}' if _real_atm_ask and _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
+    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv">{f'<span style="color:#c62828">€{round(_real_atm_ask*8+_real_otm_ask*20):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem-raw">&euro;{rec_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask ({_meff_ask_expiry_label or "?"}) | BS理论: €{rec_prem_raw:,}' if _real_atm_ask and _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
     <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv">{f'<span style="color:#c62828">€{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor):,}</span>' if _real_atm_ask and _real_otm_ask else f'<span id="dyn-pa-prem">&euro;{rec_prem:,}</span>'}</div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pa-prem-pct">{rec_prem/fv*100:.2f}%</span>{f' | BS: €{rec_prem:,}/yr' if _real_atm_ask and _real_otm_ask else ''}</div></div>
     <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv"><span id="dyn-pa-5yr">&euro;{rec_prem*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}</div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round((_real_atm_ask*8+_real_otm_ask*20)*annual_factor*5):,}</div>' if _real_atm_ask and _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('纯ATM×16','Pure ATM×16')}</div><div class="rv">{t('同预算，合约更多','Same budget, more contracts')}</div></div>
@@ -1312,7 +1315,7 @@ body.lang-zh .en{{display:none}}
   <h3 style="color:#e65100">{t(f'纯90%OTM Put &times;24，{T_months}个月滚仓 + 动态滚仓',f'Pure 90%OTM Put &times;24, {T_months}-Month Roll + Dynamic Rolling')}</h3>
   <div class="rec-grid">
     <div class="rec-item"><div class="rl">{t('OTM行权价','OTM Strike')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-otm-k">{K_90:,}</span>{t('点','pts')}</div><div style="font-size:10px;color:#888">&times;24{t('张（90% OTM）',' contracts (90% OTM)')}</div></div>
-    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem-raw">&euro;{planb_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask | BS理论: €{planb_prem_raw:,}' if _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
+    <div class="rec-item"><div class="rl">{t(f'本轮实际成本（{T_months}个月）',f'Actual Cost ({T_months}mo)')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem-raw">&euro;{planb_prem_raw:,}</span>'}</div><div style="font-size:10px;color:#888">{f'MEFF Ask ({_meff_ask_expiry_label or "?"}) | BS理论: €{planb_prem_raw:,}' if _real_otm_ask else f'BS T={T_put:.2f}yr，实际下单以IBKR报价为准'}</div></div>
     <div class="rec-item"><div class="rl">{t('年化保费','Annualized')}</div><div class="rv" style="color:#e65100">{f'<span style="color:#c62828">€{round(_real_otm_ask*24*annual_factor):,}</span>' if _real_otm_ask else f'<span id="dyn-pb-prem">&euro;{planb_prem:,}</span>'}</div><div style="font-size:10px;color:#888">= {t(f'本轮÷{T_put:.2f}',f'round÷{T_put:.2f}')}, <span id="dyn-pb-prem-pct">{planb_prem/fv*100:.2f}%</span>{f' | BS: €{planb_prem:,}/yr' if _real_otm_ask else ''}</div></div>
     <div class="rec-item"><div class="rl">{t('5年总保费','5-Year Total')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-5yr">&euro;{planb_prem*5:,}</span></div><div style="font-size:10px;color:#888">{t('假设IBEX/IV不变','assumes IBEX/IV unchanged')}</div>{f'<div style="font-size:10px;color:#c62828">MEFF: €{round(_real_otm_ask*24*annual_factor*5):,}</div>' if _real_otm_ask else ''}</div>
     <div class="rec-item"><div class="rl">vs {t('方案A','Plan A')}</div><div class="rv" style="color:#e65100"><span id="dyn-pb-save">{t('省'+str(round((1-planb_prem/rec_prem)*100))+'%保费','Save '+str(round((1-planb_prem/rec_prem)*100))+'% premium')}</span></div></div>
@@ -1960,6 +1963,11 @@ def append_premium_snapshot(live, res, iv_points):
     bs_b_raw = round(p_otm * 24)
     bs_a_annual = round(bs_a_raw * annual_factor)
     bs_b_annual = round(bs_b_raw * annual_factor)
+    # 统一用 T=1.0 计算的标准化保费，用于历史横向对比（苹果对苹果）
+    p_atm_1yr = bs_put(ibex, K_atm, 1.0)
+    p_otm_1yr = bs_put(ibex, K_otm, 1.0)
+    bs_a_1yr = round(p_atm_1yr * 8 + p_otm_1yr * 20)
+    bs_b_1yr = round(p_otm_1yr * 24)
     # MEFF Ask prices
     meff_atm_ask, meff_otm_ask = None, None
     chain_data = live.get('meff_chain', {})
@@ -1985,6 +1993,7 @@ def append_premium_snapshot(live, res, iv_points):
         iv_atm=iv_atm, iv_otm=iv_otm,
         bs_a_raw=bs_a_raw, bs_b_raw=bs_b_raw,
         bs_a_annual=bs_a_annual, bs_b_annual=bs_b_annual,
+        bs_a_1yr=bs_a_1yr, bs_b_1yr=bs_b_1yr,
         meff_a=meff_a, meff_b=meff_b,
         meff_atm_ask=meff_atm_ask, meff_otm_ask=meff_otm_ask,
         p_atm=round(p_atm, 1), p_otm=round(p_otm, 1),
@@ -2136,8 +2145,8 @@ function renderCharts(){
   DATA.forEach(function(d){
     ts.push(d.ts);
     // 实际成本：优先MEFF Ask，没有时用BS
-    costA.push(d.meff_a || d.bs_a_raw);
-    costB.push(d.meff_b || d.bs_b_raw);
+    costA.push(d.bs_a_1yr || d.bs_a_raw);   // 历史对比用1yr标准化，不用随T_put变动的raw值
+    costB.push(d.bs_b_1yr || d.bs_b_raw);
     ivAtm.push(d.iv_atm);
     ivOtm.push(d.iv_otm);
     ibex.push(d.ibex);
@@ -2176,7 +2185,7 @@ function renderCharts(){
      hovertemplate:'%{x}<br>'+T('方案B: €%{y:,}','Plan B: €%{y:,}')+'<extra></extra>'}
   ], {
     template:'plotly_white', height:400,
-    title:{text:T('保费总成本走势（单轮，MEFF实价优先）','Premium Cost Trend (Per Round, MEFF Ask Priority)'), font:{size:15,color:'#1a237e'}},
+    title:{text:T('保费总成本走势（BS 1年标准化，横向可比）','Premium Cost Trend (1-Yr Normalized BS, Comparable)'), font:{size:15,color:'#1a237e'}},
     yaxis:{title:T('保费 (EUR)','Premium (EUR)'), tickformat:','},
     legend:{x:0.01,y:0.99,bgcolor:'rgba(255,255,255,0.9)'},
     margin:{t:50,b:40,l:70,r:20}, hovermode:'x unified',
