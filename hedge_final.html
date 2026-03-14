@@ -95,7 +95,7 @@ body.lang-zh .en{display:none}
   </div>
   <div style="text-align:right;min-width:200px;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
     <div style="font-size:11px;color:#888"><span class="zh">报告生成于</span><span class="en">Report generated at</span></div>
-    <div style="font-size:15px;font-weight:800;color:#1a237e">2026-03-14 16:16 (Madrid)</div>
+    <div style="font-size:15px;font-weight:800;color:#1a237e">2026-03-14 16:17 (Madrid)</div>
     <div class="timer" id="timer"></div>
     <button onclick="fetchAll()" id="refresh-btn" style="margin-top:4px;padding:6px 16px;border:2px solid #1a237e;border-radius:8px;background:#eef2ff;cursor:pointer;font-weight:700;font-size:12px;color:#1a237e"><span class="zh">刷新数据</span><span class="en">Refresh Data</span></button>
     <span id="refresh-status" style="font-size:11px"></span>
@@ -981,7 +981,7 @@ function showTab(i){
 if(Z[0]){Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{responsive:true});document.getElementById('zoom_0').dataset.r='1'}
 // Countdown since generation
 (function(){
-  var gen=new Date('2026-03-14T16:16T(Madrid):00');
+  var gen=new Date('2026-03-14T16:17:00');
   var el=document.getElementById('timer');
   function tick(){
     var now=new Date();var d=Math.floor((now-gen)/1000);
