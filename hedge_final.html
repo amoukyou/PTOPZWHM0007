@@ -95,7 +95,7 @@ body.lang-zh .en{display:none}
   </div>
   <div style="text-align:right;min-width:200px;display:flex;flex-direction:column;align-items:flex-end;gap:4px">
     <div style="font-size:11px;color:#888"><span class="zh">报告生成于</span><span class="en">Report generated at</span></div>
-    <div style="font-size:15px;font-weight:800;color:#1a237e">2026-03-14 16:21 (Madrid)</div>
+    <div style="font-size:15px;font-weight:800;color:#1a237e">2026-03-14 16:26 (Madrid)</div>
     <div class="timer" id="timer"></div>
     <button onclick="fetchAll()" id="refresh-btn" style="margin-top:4px;padding:6px 16px;border:2px solid #1a237e;border-radius:8px;background:#eef2ff;cursor:pointer;font-weight:700;font-size:12px;color:#1a237e"><span class="zh">刷新数据</span><span class="en">Refresh Data</span></button>
     <span id="refresh-status" style="font-size:11px"></span>
@@ -367,7 +367,7 @@ body.lang-zh .en{display:none}
     | r=2.6% | T=1.00yr | <span class="zh">到期</span><span class="en">Expiry</span> Mar-27 <span class="zh">（MEFF合约代码精确日期，第三个周五到期；选最接近1年的月份）</span><span class="en">(precise date from MEFF contract code, expires 3rd Friday; nearest ~1yr expiry)</span>
   </span>
 </div>
-<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px"><b><span class="zh">MEFF 实盘价格（Mar-27 结算价）</span><span class="en">MEFF Settlement Prices (Mar-27)</span></b><br>K=13,800.0 | Close=€450.0 | IV=24.7% &middot; K=16,500.0 | Close=€1073.0 | IV=18.7% &middot; K=18,000.0 | Close=€1792.0 | IV=16.4%<br><b>ATM K=17,050</b>: MEFF插值 €991.7/张 | <b>90%OTM K=15,350</b>: MEFF插值 €807.6/张<br><span class="zh">方案A</span><span class="en">Plan A</span>(×8+×20)=€24,086 | <span class="zh">方案B</span><span class="en">Plan B</span>(×24)=€19,382</div>
+<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:12px 16px;margin-bottom:12px;font-size:13px"><b>&#128202; MEFF 实盘价格（Mar-27 结算价）</b><br>K=13,800.0 | Close=&#8364;450 | IV=24.7% &middot; K=16,500.0 | Close=&#8364;1,073 | IV=18.7% &middot; K=18,000.0 | Close=&#8364;1,792 | IV=16.4%<br><b>ATM K=17,050</b>: MEFF插值 &#8364;992/张 | <b>90%OTM K=15,350</b>: MEFF插值 &#8364;808/张<br>方案A(ATM×8+OTM×20)=<b>&#8364;24,086</b> | 方案B(OTM×24)=<b>&#8364;19,382</b></div>
 <table id="option-chain-table" style="font-size:13px">
   <tr>
     <th><span class="zh">行权价</span><span class="en">Strike</span></th>
@@ -981,7 +981,7 @@ function showTab(i){
 if(Z[0]){Plotly.newPlot('zoom_0',Z[0].data,Z[0].layout,{responsive:true});document.getElementById('zoom_0').dataset.r='1'}
 // Countdown since generation
 (function(){
-  var gen=new Date('2026-03-14T16:21:00');
+  var gen=new Date('2026-03-14T16:26:00');
   var el=document.getElementById('timer');
   function tick(){
     var now=new Date();var d=Math.floor((now-gen)/1000);
@@ -1030,6 +1030,7 @@ var P = {
   betaFI: 0.423, betaFP: 0.6271, betaIP: 0.6897,
   iv: 0.185, r: 0.026, initInv: 507000, psiEntry: 6711,
   avgCR: 0.524, fundNav: 17.16, fundUnits: 37968, Tput: 1.0,
+  meffA: 24086, meffB: 19382,
   meffPts: [{'strike': 13800.0, 'iv': 0.2473}, {'strike': 16500.0, 'iv': 0.1868}, {'strike': 18000.0, 'iv': 0.1638}]
 };
 function interpIv(K) {
@@ -1358,8 +1359,9 @@ function recalcAll() {
   var pAtm = bsPutAuto(ibex, K, P.Tput, P.r);
   var pOtm = bsPutAuto(ibex, K90, P.Tput, P.r);
 
-  var premARaw = Math.round(pAtm * 8 + pOtm * 20);  // 单轮保费
-  var premBRaw = Math.round(pOtm * 24);
+  // 优先用 MEFF 实盘结算价，没有时 fallback 到 BS
+  var premARaw = (P.meffA > 0) ? P.meffA : Math.round(pAtm * 8 + pOtm * 20);
+  var premBRaw = (P.meffB > 0) ? P.meffB : Math.round(pOtm * 24);
   var annFactor = P.Tput > 0 ? 1.0 / P.Tput : 1.0;
   var premA = Math.round(premARaw * annFactor);  // 年化保费
   var premB = Math.round(premBRaw * annFactor);
