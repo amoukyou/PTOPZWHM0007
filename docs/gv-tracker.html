@@ -1,0 +1,925 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GV基金资金流追踪 | GV Fund Flow Tracker</title>
+<script src="https://cdn.plot.ly/plotly-3.4.0.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f4f6fb;color:#1a1a2e;font-size:15px;line-height:1.65}
+.page{max-width:1200px;margin:0 auto;padding:24px 20px 60px}
+h1{font-size:24px;font-weight:800;color:#1a237e;margin-bottom:4px}
+h2{font-size:18px;font-weight:700;color:#1a237e;margin-bottom:8px}
+h3{font-size:15px;font-weight:700;color:#1a237e;margin-bottom:6px}
+.meta{color:#777;font-size:13px;margin-bottom:20px}
+.nav{display:flex;gap:12px;margin-bottom:20px;align-items:center}
+.nav a{color:#1a237e;font-weight:700;text-decoration:none;font-size:13px;padding:6px 14px;border:2px solid #1a237e;border-radius:8px}
+.nav a:hover{background:#eef2ff}
+.lang-btn{padding:6px 14px;border:2px solid #1a237e;border-radius:8px;background:white;cursor:pointer;font-size:13px;font-weight:700;color:#1a237e;margin-left:auto}
+.chart-box{background:white;border-radius:12px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,0.07);margin-bottom:16px}
+.chart-title{font-size:15px;font-weight:700;color:#1a237e;margin-bottom:4px}
+.chart-sub{font-size:12px;color:#888;margin-bottom:12px}
+.s-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.s-card{background:white;border-radius:12px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,0.07);text-align:center}
+.s-label{font-size:11px;color:#999;margin-bottom:4px;letter-spacing:.5px;text-transform:uppercase}
+.s-val{font-size:24px;font-weight:800;margin-bottom:2px}
+.s-sub{font-size:11px;color:#bbb}
+.section{margin-bottom:32px}
+.a-info{background:#e8eaf6;border-left:4px solid #1a237e;border-radius:8px;padding:14px 16px;font-size:13px;color:#333;line-height:1.8;margin-bottom:16px}
+.a-warn{background:#fff8e1;border-left:4px solid #f57f17;border-radius:8px;padding:14px 16px;font-size:13px;color:#333;line-height:1.8;margin-bottom:16px}
+.data-table{width:100%;border-collapse:collapse;font-size:13px;background:white;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.07)}
+.data-table th{text-align:left;padding:10px 12px;border-bottom:2px solid #e0e0e0;color:#1a237e;font-weight:700;background:#f4f6fb;font-size:12px}
+.data-table td{padding:10px 12px;border-bottom:1px solid #f0f0f0}
+.data-table tr:hover td{background:#f8f9ff}
+.data-table .num{text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.tag-equity{background:#e8f5e9;color:#2e7d32}
+.tag-mixed{background:#f3e5f5;color:#7b1fa2}
+.tag-bond{background:#e3f2fd;color:#1565c0}
+.tag-high{background:#fff3e0;color:#e65100}
+.tag-none{background:#fafafa;color:#999}
+.filter-btns{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filter-btn{padding:6px 14px;border-radius:20px;font-size:12px;cursor:pointer;background:white;color:#666;border:2px solid #e0e0e0;font-weight:600;transition:all .15s}
+.filter-btn:hover{border-color:#1a237e;color:#1a237e}
+.filter-btn.active{background:#1a237e;border-color:#1a237e;color:white}
+.timeline{position:relative;padding-left:28px}
+.timeline::before{content:'';position:absolute;left:10px;top:0;bottom:0;width:2px;background:#c5cae9}
+.tl-item{position:relative;margin-bottom:24px}
+.tl-dot{position:absolute;left:-24px;top:4px;width:12px;height:12px;border-radius:50%;border:2px solid #f4f6fb}
+.tl-dot.positive{background:#2e7d32}
+.tl-dot.negative{background:#c62828}
+.tl-dot.neutral{background:#f57f17}
+.tl-date{font-size:12px;color:#aaa}
+.tl-title{font-size:14px;font-weight:700;color:#1a237e;margin:2px 0}
+.tl-desc{font-size:13px;color:#666}
+body.lang-en .zh{display:none}
+body.lang-zh .en{display:none}
+@media(max-width:700px){.s-cards{grid-template-columns:1fr 1fr}.data-table{font-size:11px}}
+</style></head><body class="lang-zh">
+<div class="page">
+
+<div class="nav">
+  <a href="index.html">&larr; <span class="zh">返回主报告</span><span class="en">Back to Report</span></a>
+  <span style="color:#888;font-size:12px"><span class="zh">数据截至 2026-02-27</span><span class="en">Data as of 2026-02-27</span></span>
+  <button class="lang-btn" id="lang-btn" onclick="toggleLang()">EN</button>
+</div>
+
+<h1><span class="zh">黄金签证开放式基金资金流追踪</span><span class="en">GV Open-Ended Fund Flow Tracker</span></h1>
+<p class="meta"><span class="zh">追踪 2023-10 新规后 9 只葡萄牙黄金签证合格开放式基金的资金流入、净值表现与 PSI 指数影响。</span><span class="en">Tracking post-Oct 2023 fund flows, NAV performance, and PSI impact for 9 Portugal Golden Visa qualifying open-ended funds.</span></p>
+
+<!-- ═══════════════════ KPI CARDS ═══════════════════ -->
+<div id="kpi-cards" class="s-cards"></div>
+
+<!-- ═══════════════════ NAV PERFORMANCE ═══════════════════ -->
+<div class="section">
+  <div class="chart-box">
+    <div class="chart-title"><span class="zh">新规后净值走势对比</span><span class="en">Post-Regulation NAV Performance</span></div>
+    <div class="chart-sub"><span class="zh">2023-10-07 = 100（或成立日归一化）。点击图例切换显示。</span><span class="en">Normalized to 100 at 2023-10-07 (or inception). Click legend to toggle.</span></div>
+    <div class="filter-btns" id="navFilters">
+      <div class="filter-btn active" data-type="all"><span class="zh">全部</span><span class="en">All</span></div>
+      <div class="filter-btn" data-type="equity"><span class="zh">葡股型</span><span class="en">Equity</span></div>
+      <div class="filter-btn" data-type="bond"><span class="zh">葡债型</span><span class="en">Bond</span></div>
+      <div class="filter-btn" data-type="mixed"><span class="zh">混合型</span><span class="en">Mixed</span></div>
+    </div>
+    <div id="chart-nav" style="height:420px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ AUM EVOLUTION ═══════════════════ -->
+<div class="section">
+  <div class="chart-box">
+    <div class="chart-title"><span class="zh">基金规模变化</span><span class="en">AUM Evolution</span></div>
+    <div class="chart-sub"><span class="zh">各基金 AUM 时间序列（€M）。点击图例切换显示。</span><span class="en">Individual fund AUM time series (EUR millions). Click legend to toggle.</span></div>
+    <div id="chart-aum" style="height:420px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ PSI IMPACT ═══════════════════ -->
+<div class="section">
+  <h2><span class="zh">PSI 影响分析</span><span class="en">PSI Impact Analysis</span></h2>
+  <div class="a-info">
+    <strong><span class="zh">方法论</span><span class="en">Methodology</span>:</strong>
+    <span class="zh">新增买入力 = <b>净流入</b>（非总AUM）x 葡股配置% x PSI重叠率。存量AUM对应的股票已在市场中，只有净流入（新钱）才产生额外买入压力。净流入 = ΔAUM - (AUM_prev x 市场表现贡献)。IMGA 2024年报披露的实际净销售额€34.7M与公式估算的€34.9M误差仅0.6%，验证了方法的准确性。</span>
+    <span class="en">New Buying Power = <b>Net Inflow</b> (not total AUM) x PT Equity % x PSI Overlap. Existing AUM stocks are already in the market; only new inflows create additional buying pressure. Net Flow = ΔAUM - (AUM_prev x Market Return). IMGA's 2024 annual report disclosed actual net sales of EUR34.7M vs our estimate of EUR34.9M (0.6% error), validating the methodology.</span>
+  </div>
+  <div class="chart-box" style="overflow-x:auto">
+    <table class="data-table" id="psi-table">
+      <thead><tr>
+        <th><span class="zh">基金</span><span class="en">Fund</span></th>
+        <th class="num"><span class="zh">估算净流入 (€M)</span><span class="en">Est. Net Inflow (€M)</span></th>
+        <th class="num"><span class="zh">葡股配置%</span><span class="en">PT Equity %</span></th>
+        <th class="num"><span class="zh">PSI 重叠率%</span><span class="en">PSI Overlap %</span></th>
+        <th class="num"><span class="zh">新增买入力 (€M)</span><span class="en">New Buying Power (€M)</span></th>
+        <th class="num"><span class="zh">占 PSI 自由流通市值%</span><span class="en">% of PSI Float</span></th>
+      </tr></thead>
+      <tbody id="psi-table-body"></tbody>
+    </table>
+  </div>
+  <div class="chart-box" style="margin-top:16px">
+    <div class="chart-title"><span class="zh">净流入 → PSI 新增买入力</span><span class="en">Net Inflow → PSI New Buying Power</span></div>
+    <div id="chart-psi-bar" style="height:360px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ GV INVESTORS ═══════════════════ -->
+<div class="section">
+  <h2><span class="zh">估算 GV 投资者人数</span><span class="en">Estimated GV Investors</span></h2>
+  <div class="a-warn">
+    <span class="zh"><b>为什么用净流入而非发证数？</b> 因为葡萄牙 AIMA 审批极慢（积压 55,000+ 件），投资者是<b>先把钱打进基金再申请</b>，但证可能几年后才发。基金净流入才是"新申请量"的真实代理指标。IMGA 2023年报披露实际有 373 位 ARI 投资者（来自 36 个国籍），占基金 AUM 的 ~90%。截至 2024 年底，GV 项目累计吸收约 €73 亿投资（其中基金/资本转移 €8.37 亿），96% 的新申请走基金路线。</span>
+    <span class="en"><b>Why use net inflow instead of visa issuance?</b> Portugal's AIMA has a backlog of 55,000+ cases. Investors deposit money into funds first, then apply — visas may take years. Fund net inflows are the real proxy for new applications. IMGA's 2023 report disclosed 373 ARI investors from 36 nationalities (~90% of AUM). By end 2024, GV program absorbed ~EUR7.3B total (EUR837M in funds), with 96% of new applications via the fund route.</span>
+  </div>
+  <div class="chart-box" style="overflow-x:auto">
+    <table class="data-table" id="investor-table">
+      <thead><tr>
+        <th><span class="zh">基金</span><span class="en">Fund</span></th>
+        <th><span class="zh">类型</span><span class="en">Type</span></th>
+        <th class="num"><span class="zh">最新 AUM (€M)</span><span class="en">Latest AUM (€M)</span></th>
+        <th class="num"><span class="zh">估算 GV 投资者数</span><span class="en">Est. GV Investors</span></th>
+        <th class="num"><span class="zh">成立以来收益</span><span class="en">Since Inception</span></th>
+        <th><span class="zh">数据质量</span><span class="en">Data Quality</span></th>
+      </tr></thead>
+      <tbody id="investor-table-body"></tbody>
+      <tfoot><tr style="font-weight:700;border-top:2px solid #1a237e">
+        <td colspan="2"><span class="zh">合计（9只开放式基金）</span><span class="en">Total (9 open-ended funds)</span></td>
+        <td class="num" id="inv-total-aum"></td>
+        <td class="num" id="inv-total-count"></td>
+        <td></td><td></td>
+      </tr></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════ POLICY TIMELINE ═══════════════════ -->
+<div class="section">
+  <h2><span class="zh">政策事件时间线</span><span class="en">Policy Timeline</span></h2>
+  <div class="chart-box">
+    <div class="timeline" id="timeline-el"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ SOURCES & METHODOLOGY ═══════════════════ -->
+<div class="section">
+  <h2><span class="zh">数据来源与方法论</span><span class="en">Sources &amp; Methodology</span></h2>
+  <div class="a-info">
+    <span class="zh"><b>AUM 数据：</b>来源于各基金官网、DECO Proteste、基金年报/半年报资产负债表、APFIPP 报告。<br>
+    <b>估算净流入：</b>Net Flow = ΔAUM - (AUM_prev x Fund Return)。股票基金使用PSI收益率作为代理，债券基金使用3%年化估算，混合基金按60/40加权。<br>
+    <b>PSI 影响估算：</b>New Buying Power = 净流入(非总AUM) x PT Equity % x PSI Overlap。4只基金(Golden Income / Atlantic Bond / Horizon / Heed Top)投向为债券或替代资产，葡股配置约0%，对PSI无影响。<br>
+    <b>重要声明：</b>本报告仅供研究参考，不构成投资建议。估算值存在误差，实际数据以各基金官方披露为准。</span>
+    <span class="en"><b>AUM Data:</b> Sourced from fund websites, DECO Proteste, annual/semi-annual reports, APFIPP statistics.<br>
+    <b>Estimated Net Inflow:</b> Net Flow = ΔAUM - (AUM_prev x Fund Return). Equity funds use PSI returns as proxy; bond funds use 3% annualized estimate; mixed funds use 60/40 weighting.<br>
+    <b>PSI Impact:</b> New Buying Power = Net Inflow (not total AUM) x PT Equity % x PSI Overlap. 4 funds (Golden Income / Atlantic Bond / Horizon / Heed Top) invest in bonds or alternatives with ~0% PT equity exposure.<br>
+    <b>Disclaimer:</b> This report is for research purposes only and does not constitute investment advice.</span>
+  </div>
+  <div class="chart-box" style="overflow-x:auto">
+    <table class="data-table" id="sources-table">
+      <thead><tr>
+        <th><span class="zh">来源</span><span class="en">Source</span></th>
+        <th><span class="zh">类型</span><span class="en">Type</span></th>
+        <th><span class="zh">覆盖基金</span><span class="en">Coverage</span></th>
+        <th><span class="zh">链接</span><span class="en">Link</span></th>
+      </tr></thead>
+      <tbody id="sources-table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /page -->
+
+<script>
+// ============================================================
+// LANGUAGE
+// ============================================================
+var LANG = 'zh';
+function toggleLang(){
+  LANG = LANG==='zh'?'en':'zh';
+  document.body.className = 'lang-'+LANG;
+  document.getElementById('lang-btn').textContent = LANG==='zh'?'EN':'中文';
+  renderAll();
+}
+function T(zh,en){return LANG==='zh'?zh:en;}
+
+// ============================================================
+// DATA LAYER — copied verbatim from source
+// ============================================================
+
+var FUNDS = [
+  {
+    id: 'imga', name: 'IMGA Ações Portugal', short: 'IMGA',
+    type: 'equity', manager: 'IM Gestão de Ativos',
+    isin: 'PTAFIALM0006',
+    gvIsin: 'PTAFIALM0006 (Cat A) / PTIG1DHM0003 (Cat R)',
+    aliases: ['PTIG2OHM0009','PTIG1DHM0003','PTAFIJHM0003'],
+    gvQualified: true, inception: '1995-07-20',
+    ptEquityPct: 1.00, psiOverlap: 0.95,
+    psiImpact: 'HIGH', assetDesc: '~100% 葡萄牙上市股票',
+    color: '#1565c0',
+    aum: [
+      {date:'2020-12-31', value:22.4, source:'IMGA年报(份额×单价计算)', verified:true},
+      {date:'2021-12-31', value:113.2, source:'IMGA年报(Cat A €86.5M + Cat R €26.8M)', verified:true},
+      {date:'2022-12-31', value:145.8, source:'IMGA年报(Cat A €110.6M + Cat R €35.1M)', verified:true},
+      {date:'2023-12-31', value:208.3, source:'IMGA年报(Cat A €148.3M + Cat R €60.0M)', verified:true},
+      {date:'2024-12-31', value:250.5, source:'IMGA年报资产负债表 €250,547,225', verified:true},
+      {date:'2025-06-30', value:333.3, source:'IMGA半年报资产负债表 €333,313,060', verified:true},
+      {date:'2025-12-31', value:418.0, source:'ECO报道 >€418M', verified:false},
+      {date:'2026-02-27', value:470.4, source:'IMGA官网 / DECO Proteste', verified:true},
+    ],
+    actualNetFlows: [
+      {period:'2024', netSales:34.7, subscriptions:42.9, redemptions:8.2, source:'IMGA 2024年报'},
+      {period:'2023', netSales:38.0, subscriptions:null, redemptions:null, source:'FundsPeople'},
+    ],
+    returns: [{period:'2024',value:0.035},{period:'2023',value:0.15},{period:'2022',value:0.044},{period:'2021',value:0.216},{period:'2020',value:-0.133}],
+    sourceUrl: 'https://www.imga.pt/fim/a%C3%87%C3%95es/imga-a%C3%87%C3%95es-portugal/'
+  },
+  {
+    id: 'optimize', name: 'Optimize Portugal Golden Opportunities', short: 'Optimize',
+    type: 'mixed', manager: 'Optimize Investment Partners',
+    isin: 'PTOPZWHM0007', gvIsin: 'PTOPZWHM0007 (单一份额类别)',
+    aliases: [],
+    gvQualified: true, inception: '2021-12-31',
+    ptEquityPct: 0.70, psiOverlap: 0.85,
+    psiImpact: 'HIGH', assetDesc: '70% 葡股 + 30% 葡债, min 60% equity',
+    color: '#2e7d32',
+    aum: [
+      {date:'2021-12-31', value:0.65, source:'Optimize 2024年报 p.12', verified:true},
+      {date:'2022-03-31', value:0.84, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2022-06-30', value:0.98, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2022-09-30', value:1.16, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2022-12-31', value:2.27, source:'Optimize 2024年报 p.12/22', verified:true},
+      {date:'2023-03-31', value:3.04, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2023-06-30', value:7.47, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2023-09-30', value:8.28, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2023-12-31', value:10.13, source:'Optimize 2024年报 p.12/22', verified:true},
+      {date:'2024-03-31', value:12.03, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2024-06-30', value:18.78, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2024-09-30', value:25.07, source:'Optimize 2024年报 p.22', verified:true},
+      {date:'2024-12-31', value:32.80, source:'Optimize 2024年报 p.12/22', verified:true},
+      {date:'2025-07-31', value:176.0, source:'bestcitizens.com / d7visa.com', verified:false},
+      {date:'2026-02-27', value:380.3, source:'DECO Proteste', verified:true},
+    ],
+    actualNetFlows: [],
+    returns: [{period:'2024',value:0.063},{period:'2023',value:0.173},{period:'2022',value:0.042}],
+    sourceUrl: 'https://optimize.pt/en/optimize-portugal/'
+  },
+  {
+    id: 'sixty', name: 'Sixty Degrees Ações Portugal', short: 'Sixty°',
+    type: 'equity', manager: 'Sixty Degrees SGOIC',
+    isin: 'PTSXYFHM0005',
+    gvIsin: 'PTSXYFHM0005 (Cat I, min €100K)',
+    aliases: ['PTSXY7HM0005','PTSXYIHM0002','PTSXYGHM0004'],
+    gvQualified: true, inception: '2021-09-10',
+    ptEquityPct: 0.85, psiOverlap: 0.90,
+    psiImpact: 'HIGH', assetDesc: 'min 85% 葡萄牙上市股票',
+    color: '#7b1fa2',
+    aum: [
+      {date:'2020-12-31', value:7.04, source:'Sixty° 2024年报 VLGF', verified:true},
+      {date:'2021-12-31', value:8.29, source:'Sixty° 2024年报 VLGF', verified:true},
+      {date:'2022-12-31', value:8.10, source:'Sixty° 2024年报 VLGF', verified:true},
+      {date:'2023-12-31', value:9.35, source:'Sixty° 2024年报 VLGF', verified:true},
+      {date:'2024-12-31', value:11.65, source:'Sixty° 2024年报 VLGF=€11,653,687', verified:true},
+      {date:'2026-02-27', value:43.1, source:'DECO Proteste (全部类别)', verified:true},
+    ],
+    actualNetFlows: [],
+    returns: [{period:'3yr_ann',value:0.085}],
+    sourceUrl: 'https://sixty-degrees.com/en/fund/sixty-degrees-acoes-portugal-en/'
+  },
+  {
+    id: 'plo', name: 'Portugal Liquid Opportunities', short: 'PLO',
+    type: 'equity', manager: 'Oxy Capital SGOIC',
+    isin: 'PTOXTHHM0004',
+    gvIsin: 'PTOXTHHM0004 (Cat B, GV class)',
+    aliases: ['PTOXTGHM0005'],
+    gvQualified: true, inception: '2024-03-01',
+    ptEquityPct: 0.65, psiOverlap: 0.40,
+    psiImpact: 'LOW', assetDesc: '65% 葡股(中小盘) + 35% 国际股票',
+    color: '#c62828',
+    aum: [
+      {date:'2024-03-31', value:1.0, source:'估算(成立初期)', verified:false},
+      {date:'2024-12-31', value:8.0, source:'估算', verified:false},
+      {date:'2026-02-27', value:15.0, source:'估算', verified:false},
+    ],
+    actualNetFlows: [],
+    returns: [{period:'since_inception',value:-0.176}],
+    sourceUrl: 'https://nomadgate.com/portugal/funds/portugal-liquid-opportunities/'
+  },
+  {
+    id: 'c2atlantic', name: 'C2 Atlantic Open-Ended Fund', short: 'C2 Atlantic',
+    type: 'mixed', manager: 'C2 Capital Partners',
+    isin: 'PTCRZCHM0003',
+    gvIsin: 'PTCRZCHM0003',
+    aliases: ['PTCRWMHM0004'],
+    gvQualified: true, inception: '2025-08-01',
+    ptEquityPct: 0.35, psiOverlap: 0.80,
+    psiImpact: 'MEDIUM', assetDesc: '60% 葡(股票+债券) / 40% 国际大盘股',
+    color: '#e65100',
+    aum: [
+      {date:'2025-08-31', value:1.0, source:'估算(成立初期)', verified:false},
+      {date:'2026-02-27', value:5.0, source:'估算', verified:false},
+    ],
+    actualNetFlows: [],
+    returns: [],
+    sourceUrl: 'https://nomadgate.com/portugal/funds/c2-atlantic/'
+  },
+  {
+    id: 'goldenincome', name: 'Portugal Golden Income Fund', short: 'Golden Income',
+    type: 'bond', manager: '3 Comma Capital',
+    isin: 'PT3CMPHM0009',
+    gvIsin: 'PT3CMPHM0009 (Class AS, GV专用)',
+    aliases: ['PT3CMEHM0002','PT3CMGHM0000','PT3CMQHM0008'],
+    gvQualified: true, inception: '2024-06-01',
+    ptEquityPct: 0.00, psiOverlap: 0.00,
+    psiImpact: 'NONE', assetDesc: '70% 葡公司债 + 15% 全球股票 + 15% 加密/黄金',
+    color: '#f57f17',
+    aum: [
+      {date:'2024-06-30', value:1.0, source:'估算(成立初期)', verified:false},
+      {date:'2024-12-31', value:5.0, source:'估算', verified:false},
+      {date:'2026-02-27', value:12.0, source:'估算', verified:false},
+    ],
+    actualNetFlows: [],
+    returns: [],
+    sourceUrl: 'https://www.3commacapital.com/en/investment-funds/portugal-golden-income-fund/'
+  },
+  {
+    id: 'heedtop', name: 'Heed Top', short: 'Heed Top',
+    type: 'bond', manager: 'Heed Capital',
+    isin: 'PTVORYHM0007',
+    gvIsin: 'PTVORYHM0007 (单一份额类别)',
+    aliases: [],
+    gvQualified: true, inception: '2024-01-01',
+    ptEquityPct: 0.05, psiOverlap: 0.10,
+    psiImpact: 'NONE', assetDesc: '主要为葡公司债/证券化信贷, max 65% equity但实际偏债',
+    color: '#00838f',
+    aum: [
+      {date:'2024-03-31', value:2.0, source:'估算', verified:false},
+      {date:'2024-12-31', value:8.0, source:'估算', verified:false},
+      {date:'2026-02-27', value:20.0, source:'估算', verified:false},
+    ],
+    actualNetFlows: [],
+    returns: [],
+    sourceUrl: 'https://heedcap.com/en/golden-visa/'
+  },
+  {
+    id: 'atlanticbond', name: 'Atlantic Bond Fund', short: 'Atlantic Bond',
+    type: 'bond', manager: '3 Comma Capital',
+    isin: 'PT3CMNHM0001',
+    gvIsin: 'PT3CMNHM0001 (Class CD)',
+    aliases: ['PT3CMOHM0000','PT3CMUHM0002'],
+    gvQualified: true, inception: '2024-06-01',
+    ptEquityPct: 0.00, psiOverlap: 0.00,
+    psiImpact: 'NONE', assetDesc: '60%+ 葡公司债 + 欧区投资级债. 纯债基金',
+    color: '#78909c',
+    aum: [
+      {date:'2024-06-30', value:1.0, source:'估算', verified:false},
+      {date:'2024-12-31', value:3.0, source:'估算', verified:false},
+      {date:'2026-02-27', value:8.0, source:'估算', verified:false},
+    ],
+    actualNetFlows: [],
+    returns: [],
+    sourceUrl: 'https://www.3commacapital.com/en/investment-funds/atlantic-bond-fund/'
+  },
+  {
+    id: 'horizon', name: 'Horizon Fund (Octanova)', short: 'Horizon',
+    type: 'mixed', manager: 'Octanova',
+    isin: 'PTEBEEHM0002',
+    gvIsin: 'PTEBEEHM0002 (Cat A)',
+    aliases: ['PTEBELHM0003'],
+    gvQualified: true, inception: '2024-08-22',
+    ptEquityPct: 0.00, psiOverlap: 0.00,
+    psiImpact: 'NONE', assetDesc: '65% 葡固收(公司债) + 35% 加密ETF. 0% 葡股',
+    color: '#ef6c00',
+    aum: [
+      {date:'2024-09-30', value:1.0, source:'估算', verified:false},
+      {date:'2024-12-31', value:3.0, source:'估算', verified:false},
+      {date:'2026-02-27', value:10.0, source:'估算', verified:false},
+    ],
+    actualNetFlows: [],
+    returns: [],
+    sourceUrl: 'https://nomadgate.com/portugal/funds/'
+  },
+  // Reference funds (not GV-specific)
+  {
+    id: 'bpi', name: 'BPI Portugal', short: 'BPI',
+    type: 'equity', manager: 'BPI Gestão de Ativos',
+    isin: 'PTYPIGLM0000', gvIsin: 'N/A (非GV专用)',
+    aliases: [],
+    gvQualified: false, inception: '1994-01-03',
+    ptEquityPct: 0.85, psiOverlap: 0.90,
+    psiImpact: 'REF', assetDesc: '~85% 葡萄牙上市股票 (参考基金)',
+    color: '#d32f2f',
+    aum: [
+      {date:'2022-12-31', value:36.7, source:'FundsPeople', verified:false},
+      {date:'2024-12-31', value:51.7, source:'BPI年报资产负债表 €51,682,644', verified:true},
+      {date:'2025-06-30', value:61.9, source:'BPI半年报资产负债表 €61,853,044', verified:true},
+      {date:'2026-02-27', value:83.4, source:'DECO Proteste', verified:true},
+    ],
+    actualNetFlows: [],
+    returns: [{period:'2024',value:0.035},{period:'2023',value:0.15},{period:'2022',value:0.044}],
+    sourceUrl: 'https://www.deco.proteste.pt/investe/investimentos/fundos/bpi-portugal'
+  },
+  {
+    id: 'gnb', name: 'GNB Portugal Ações', short: 'GNB',
+    type: 'equity', manager: 'GNB Gestão de Ativos',
+    isin: 'PTYESYLM0009', gvIsin: 'N/A (非GV专用)',
+    aliases: [],
+    gvQualified: false, inception: '1997-09-15',
+    ptEquityPct: 0.73, psiOverlap: 0.90,
+    psiImpact: 'REF', assetDesc: '~73% 葡股 + 13% 葡债 + 14% 现金 (参考基金)',
+    color: '#ff8f00',
+    aum: [
+      {date:'2024-06-30', value:40.0, source:'Investing.com', verified:false},
+      {date:'2025-06-30', value:48.9, source:'Yahoo Finance', verified:false},
+      {date:'2025-12-31', value:80.4, source:'Investing.com', verified:false},
+      {date:'2026-02-27', value:83.4, source:'DECO Proteste', verified:true},
+    ],
+    actualNetFlows: [],
+    returns: [{period:'2024',value:0.185},{period:'2023',value:0.0261}],
+    sourceUrl: 'https://www.gnbga.pt/SF_FichaFundo_FO/codfun/14165990414'
+  },
+];
+
+var PSI_DATA = {
+  freeFloatMcap: 15440,
+  top10Weight: 0.9004,
+  ytd2025: 0.2958,
+  constituents: [
+    {name:'BCP', ticker:'BCP', sector:'Finance', weight:15.26},
+    {name:'EDP Renováveis', ticker:'EDPR', sector:'Utilities', weight:14.37},
+    {name:'EDP', ticker:'EDP', sector:'Utilities', weight:12.44},
+    {name:'Jerónimo Martins', ticker:'JMT', sector:'Retail', weight:10.12},
+    {name:'Galp Energia', ticker:'GALP', sector:'Energy', weight:9.32},
+    {name:'Sonae', ticker:'SON', sector:'Technology', weight:8.35},
+    {name:'REN', ticker:'RENE', sector:'Utilities', weight:7.64},
+    {name:'Navigator', ticker:'NVG', sector:'Process Ind.', weight:4.34},
+    {name:'CTT', ticker:'CTT', sector:'Transport', weight:4.19},
+    {name:'NOS', ticker:'NOS', sector:'Telecom', weight:4.02},
+  ],
+  timeSeries: [
+    {date:'2023-09-30', value:6190},
+    {date:'2023-12-31', value:6410},
+    {date:'2024-03-31', value:6630},
+    {date:'2024-06-30', value:6520},
+    {date:'2024-09-30', value:6780},
+    {date:'2024-12-31', value:6390},
+    {date:'2025-03-31', value:7050},
+    {date:'2025-06-30', value:7480},
+    {date:'2025-09-30', value:7820},
+    {date:'2025-12-31', value:8280},
+    {date:'2026-02-27', value:8650},
+  ]
+};
+
+var POLICY_EVENTS = [
+  {date:'2023-10-07', type:'negative', title:'黄金签证新规生效',
+   titleEn:'GV New Rules Take Effect',
+   desc:'房地产投资路线被移除。仅"不直接或间接投资房地产"的基金仍合格。资金开始大量涌入开放式基金。',
+   descEn:'Real estate route removed. Only funds that do not invest directly/indirectly in real estate remain eligible. Capital floods into open-ended funds.'},
+  {date:'2024-01-01', type:'positive', title:'基金路线成为主要申请途径',
+   titleEn:'Fund Route Becomes Primary',
+   desc:'新规后第一个完整年度开始，多只新开放式基金成立（Heed Top、PLO等）。',
+   descEn:'First full year post-regulation. Multiple new open-ended funds launched (Heed Top, PLO, etc.).'},
+  {date:'2024-05-29', type:'neutral', title:'IMGA 推出 Category P',
+   titleEn:'IMGA Launches Category P',
+   desc:'IMGA Ações Portugal 推出新的 P 类份额，最低投资€10万，降低门槛。',
+   descEn:'IMGA Ações Portugal launches new P share class with EUR100K minimum, lowering the barrier.'},
+  {date:'2024-08-22', type:'neutral', title:'Horizon Fund 成立',
+   titleEn:'Horizon Fund Launched',
+   desc:'Octanova 推出含 35% 数字资产 (BTC ETF) 的混合型黄金签证基金。',
+   descEn:'Octanova launches a mixed GV fund with 35% digital assets (BTC ETF).'},
+  {date:'2025-01-01', type:'neutral', title:'2025年新基金涌现',
+   titleEn:'2025 New Fund Wave',
+   desc:'C2 Atlantic 等新基金成立，市场竞争加剧。Optimize 规模开始爆发式增长。',
+   descEn:'New funds like C2 Atlantic launch. Competition intensifies. Optimize experiences explosive growth.'},
+  {date:'2025-06-01', type:'negative', title:'审批放缓传闻',
+   titleEn:'Approval Slowdown Rumors',
+   desc:'市场传出葡萄牙政府审批速度放缓、政策可能再次调整的消息。',
+   descEn:'Reports emerge of government approval slowdowns and potential policy changes.'},
+  {date:'2025-10-01', type:'negative', title:'政策不确定性加剧',
+   titleEn:'Policy Uncertainty Intensifies',
+   desc:'葡萄牙政府对黄金签证态度反复，部分申请人反映下证困难。市场开始关注赎回风险。',
+   descEn:'Government sends mixed signals on GV program. Some applicants report difficulties. Market begins watching for redemption risk.'},
+  {date:'2026-01-01', type:'neutral', title:'2026年展望',
+   titleEn:'2026 Outlook',
+   desc:'开放式基金总规模已超€9.6亿，但政策不确定性仍在。需持续监控净流入趋势。',
+   descEn:'Total open-ended fund AUM exceeds EUR960M, but policy uncertainty persists. Net inflow trends require monitoring.'},
+];
+
+var NAV_DATA = {
+  imga: [
+    {date:'2023-09-01',nav:17.81},{date:'2023-10-01',nav:18.30},{date:'2023-11-01',nav:19.00},
+    {date:'2023-12-01',nav:18.94},{date:'2024-01-01',nav:18.91},{date:'2024-02-01',nav:18.61},
+    {date:'2024-03-01',nav:18.89},{date:'2024-04-01',nav:19.82},{date:'2024-05-01',nav:20.86},
+    {date:'2024-06-01',nav:19.93},{date:'2024-07-01',nav:20.37},{date:'2024-08-01',nav:20.46},
+    {date:'2024-09-01',nav:20.34},{date:'2024-10-01',nav:19.75},{date:'2024-11-01',nav:19.54},
+    {date:'2024-12-01',nav:19.61},{date:'2025-01-01',nav:20.13},{date:'2025-02-01',nav:21.17},
+    {date:'2025-03-01',nav:21.48},{date:'2025-04-01',nav:21.74},{date:'2025-05-01',nav:23.45},
+    {date:'2025-06-01',nav:23.56},{date:'2025-07-01',nav:24.43},{date:'2025-08-01',nav:24.74},
+    {date:'2025-09-01',nav:25.14},{date:'2025-10-01',nav:26.47},{date:'2025-11-01',nav:25.60},
+    {date:'2025-12-01',nav:26.02},{date:'2026-01-01',nav:26.96},{date:'2026-02-01',nav:28.90},
+    {date:'2026-03-01',nav:28.28},
+  ],
+  optimize: [
+    {date:'2023-09-01',nav:11.62},{date:'2023-10-01',nav:11.73},{date:'2023-11-01',nav:12.15},
+    {date:'2023-12-01',nav:12.24},{date:'2024-01-01',nav:12.26},{date:'2024-02-01',nav:12.11},
+    {date:'2024-03-01',nav:12.38},{date:'2024-04-01',nav:12.94},{date:'2024-05-01',nav:13.42},
+    {date:'2024-06-01',nav:13.00},{date:'2024-07-01',nav:13.14},{date:'2024-08-01',nav:13.14},
+    {date:'2024-09-01',nav:13.12},{date:'2024-10-01',nav:12.83},{date:'2024-11-01',nav:12.85},
+    {date:'2024-12-01',nav:13.00},{date:'2025-01-01',nav:13.26},{date:'2025-02-01',nav:13.75},
+    {date:'2025-03-01',nav:13.92},{date:'2025-04-01',nav:14.09},{date:'2025-05-01',nav:15.07},
+    {date:'2025-06-01',nav:15.09},{date:'2025-07-01',nav:15.49},{date:'2025-08-01',nav:15.86},
+    {date:'2025-09-01',nav:15.95},{date:'2025-10-01',nav:16.57},{date:'2025-11-01',nav:16.05},
+    {date:'2025-12-01',nav:16.26},{date:'2026-01-01',nav:16.53},{date:'2026-02-01',nav:17.58},
+    {date:'2026-03-01',nav:17.20},
+  ],
+  sixty: [
+    {date:'2023-09-01',nav:5.86},{date:'2023-10-01',nav:5.98},{date:'2023-11-01',nav:6.11},
+    {date:'2023-12-01',nav:6.02},{date:'2024-01-01',nav:6.06},{date:'2024-02-01',nav:5.96},
+    {date:'2024-03-01',nav:6.14},{date:'2024-04-01',nav:6.44},{date:'2024-05-01',nav:6.70},
+    {date:'2024-06-01',nav:6.48},{date:'2024-07-01',nav:6.66},{date:'2024-08-01',nav:6.71},
+    {date:'2024-09-01',nav:6.65},{date:'2024-10-01',nav:6.52},{date:'2024-11-01',nav:6.50},
+    {date:'2024-12-01',nav:6.54},{date:'2025-01-01',nav:6.74},{date:'2025-02-01',nav:7.08},
+    {date:'2025-03-01',nav:7.21},{date:'2025-04-01',nav:7.28},{date:'2025-05-01',nav:7.84},
+    {date:'2025-06-01',nav:7.91},{date:'2025-07-01',nav:8.11},{date:'2025-08-01',nav:8.21},
+    {date:'2025-09-01',nav:8.36},{date:'2025-10-01',nav:8.71},{date:'2025-11-01',nav:8.49},
+    {date:'2025-12-01',nav:8.63},{date:'2026-01-01',nav:8.99},{date:'2026-02-01',nav:9.64},
+    {date:'2026-03-01',nav:9.51},
+  ],
+  plo: [
+    {date:'2024-11-01',nav:1025.68},{date:'2024-12-01',nav:1059.65},
+    {date:'2025-01-01',nav:1084.93},{date:'2025-02-01',nav:1090.39},{date:'2025-03-01',nav:1104.41},
+    {date:'2025-04-01',nav:1153.93},{date:'2025-05-01',nav:1176.42},{date:'2025-06-01',nav:1175.83},
+    {date:'2025-07-01',nav:1200.44},{date:'2025-08-01',nav:1217.80},{date:'2025-09-01',nav:1238.17},
+    {date:'2025-10-01',nav:1214.30},{date:'2025-11-01',nav:1244.55},
+  ],
+  goldenincome: [
+    {date:'2024-10-02',nav:1000.00},{date:'2024-10-31',nav:1002.10},{date:'2024-11-30',nav:1064.30},
+    {date:'2024-12-31',nav:1061.10},{date:'2025-01-31',nav:1077.60},{date:'2026-03-12',nav:1082.97},
+  ],
+  atlanticbond: [
+    {date:'2025-06-20',nav:1000.00},{date:'2026-03-12',nav:1012.03},
+  ],
+  heedtop: [
+    {date:'2024-09-12',nav:1000.00},{date:'2025-10-31',nav:1050.00},
+  ],
+  bpi: [
+    {date:'2023-09-01',nav:19.92},{date:'2023-10-01',nav:20.47},{date:'2023-11-01',nav:21.06},
+    {date:'2023-12-01',nav:20.93},{date:'2024-01-01',nav:20.64},{date:'2024-02-01',nav:20.07},
+    {date:'2024-03-01',nav:20.81},{date:'2024-04-01',nav:22.01},{date:'2024-05-01',nav:23.15},
+    {date:'2024-06-01',nav:22.25},{date:'2024-07-01',nav:22.93},{date:'2024-08-01',nav:23.06},
+    {date:'2024-09-01',nav:22.98},{date:'2024-10-01',nav:21.85},{date:'2024-11-01',nav:21.96},
+    {date:'2024-12-01',nav:22.03},{date:'2025-01-01',nav:22.58},{date:'2025-02-01',nav:23.60},
+    {date:'2025-03-01',nav:23.82},{date:'2025-04-01',nav:24.07},{date:'2025-05-01',nav:25.71},
+    {date:'2025-06-01',nav:26.00},{date:'2025-07-01',nav:26.66},{date:'2025-08-01',nav:26.93},
+    {date:'2025-09-01',nav:27.33},{date:'2025-10-01',nav:28.62},{date:'2025-11-01',nav:27.73},
+    {date:'2025-12-01',nav:28.04},{date:'2026-01-01',nav:29.06},{date:'2026-02-01',nav:31.41},
+    {date:'2026-03-01',nav:30.99},
+  ],
+  gnb: [
+    {date:'2023-09-01',nav:6.48},{date:'2023-10-01',nav:6.62},{date:'2023-11-01',nav:6.81},
+    {date:'2023-12-01',nav:6.76},{date:'2024-01-01',nav:6.76},{date:'2024-02-01',nav:6.70},
+    {date:'2024-03-01',nav:6.88},{date:'2024-04-01',nav:7.23},{date:'2024-05-01',nav:7.61},
+    {date:'2024-06-01',nav:7.33},{date:'2024-07-01',nav:7.57},{date:'2024-08-01',nav:7.60},
+    {date:'2024-09-01',nav:7.54},{date:'2024-10-01',nav:7.30},{date:'2024-11-01',nav:7.23},
+    {date:'2024-12-01',nav:7.27},{date:'2025-01-01',nav:7.46},{date:'2025-02-01',nav:7.82},
+    {date:'2025-03-01',nav:7.96},{date:'2025-04-01',nav:8.03},{date:'2025-05-01',nav:8.69},
+    {date:'2025-06-01',nav:8.79},{date:'2025-07-01',nav:9.03},{date:'2025-08-01',nav:9.15},
+    {date:'2025-09-01',nav:9.29},{date:'2025-10-01',nav:9.77},{date:'2025-11-01',nav:9.44},
+    {date:'2025-12-01',nav:9.57},{date:'2026-01-01',nav:9.90},{date:'2026-02-01',nav:10.63},
+    {date:'2026-03-01',nav:10.39},
+  ],
+};
+
+var SOURCES = [
+  {name:'IMGA 官网', nameEn:'IMGA Website', type:'基金官网', typeEn:'Fund Website', funds:'IMGA Ações Portugal', url:'https://www.imga.pt/fim/a%C3%87%C3%95es/imga-a%C3%87%C3%95es-portugal/'},
+  {name:'IMGA 2024年报 PDF', nameEn:'IMGA 2024 Annual Report', type:'年报', typeEn:'Annual Report', funds:'IMGA Ações Portugal', url:'https://www.imga.pt/MediaRedirect.ashx?id=5290'},
+  {name:'IMGA H1 2025半年报', nameEn:'IMGA H1 2025 Semi-Annual', type:'半年报', typeEn:'Semi-Annual', funds:'IMGA Ações Portugal', url:'https://www.imga.pt/media/3877/ac_rc_semestral_2025_imga_acoes_portugal_eng.pdf'},
+  {name:'Optimize 2024年报 PDF', nameEn:'Optimize 2024 Annual Report', type:'年报', typeEn:'Annual Report', funds:'Optimize', url:'https://optimize.pt/wp-content/uploads/2025/11/2024-Annual-report-Optimize-Portugal-Golden-Opportunities-Fund.pdf'},
+  {name:'BPI Portugal 半年报', nameEn:'BPI Portugal Semi-Annual', type:'半年报', typeEn:'Semi-Annual', funds:'BPI Portugal', url:'https://bancobpi.pt/contentservice/getContent?documentName=PR_WCS01_UCM01004613'},
+  {name:'GNB 基金页面', nameEn:'GNB Fund Page', type:'基金官网', typeEn:'Fund Website', funds:'GNB Portugal Ações', url:'https://www.gnbga.pt/SF_FichaFundo_FO/codfun/14165990414'},
+  {name:'DECO Proteste', nameEn:'DECO Proteste', type:'第三方', typeEn:'Third Party', funds:'全部 / All', url:'https://www.deco.proteste.pt/investe/investimentos/fundos/'},
+  {name:'APFIPP 统计', nameEn:'APFIPP Statistics', type:'行业协会', typeEn:'Industry Assoc.', funds:'全部 / All', url:'https://www.apfipp.pt/pt/estatisticas/ativos-sob-gestao/oic-mobiliario/'},
+  {name:'PSI Factsheet (Euronext)', nameEn:'PSI Factsheet (Euronext)', type:'指数', typeEn:'Index', funds:'PSI', url:'https://live.euronext.com/sites/default/files/documentation/index-fact-sheets/PSI_Index_Factsheet.pdf'},
+  {name:'Nomad Gate 基金目录', nameEn:'Nomad Gate Fund Directory', type:'第三方', typeEn:'Third Party', funds:'全部 / All', url:'https://nomadgate.com/portugal/open-ended-funds/'},
+  {name:'ECO 报道', nameEn:'ECO News', type:'媒体', typeEn:'Media', funds:'IMGA等', url:'https://eco.sapo.pt/especiais/os-fundos-nacionais-que-mais-brilharam-no-ultimo-ano/'},
+  {name:'FundsPeople', nameEn:'FundsPeople', type:'媒体', typeEn:'Media', funds:'全部 / All', url:'https://fundspeople.com/pt/'},
+  {name:'Sixty Degrees 2024年报', nameEn:'Sixty Degrees 2024 Annual Report', type:'年报', typeEn:'Annual Report', funds:'Sixty Degrees', url:'https://sixty-degrees.com/wp-content/uploads/2025/04/frc15283615870000020241231.pdf'},
+];
+
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+function fmt(n, decimals) {
+  if (decimals === undefined) decimals = 1;
+  if (n >= 1000) return (n/1000).toFixed(1) + 'B';
+  if (n >= 1) return n.toFixed(decimals) + 'M';
+  return (n*1000).toFixed(0) + 'K';
+}
+function fmtEur(n) { return '\u20AC' + fmt(n); }
+function fmtPct(n) { return (n*100).toFixed(2) + '%'; }
+function getLatestAum(fund) {
+  if (!fund.aum.length) return 0;
+  return fund.aum[fund.aum.length-1].value;
+}
+function getAumAtDate(fund, dateStr) {
+  var target = new Date(dateStr).getTime();
+  var closest = null, closestDiff = Infinity;
+  for (var i = 0; i < fund.aum.length; i++) {
+    var d = fund.aum[i];
+    var diff = Math.abs(new Date(d.date).getTime() - target);
+    if (diff < closestDiff) { closestDiff = diff; closest = d; }
+  }
+  return closest ? closest.value : 0;
+}
+function estimateNetFlow(fund, fromDate, toDate) {
+  var aumFrom = getAumAtDate(fund, fromDate);
+  var aumTo = getAumAtDate(fund, toDate);
+  if (aumFrom === 0) return aumTo;
+  var deltaAum = aumTo - aumFrom;
+  var years = (new Date(toDate) - new Date(fromDate)) / (365.25*86400000);
+  var estReturn;
+  if (fund.type === 'equity') {
+    estReturn = Math.pow(8650/6190, years/2.4) - 1;
+  } else if (fund.type === 'bond') {
+    estReturn = 0.03 * years;
+  } else {
+    estReturn = Math.pow(8650/6190, years/2.4) * 0.6 + 0.03 * years * 0.4 - 1;
+  }
+  var perfEffect = aumFrom * estReturn;
+  return deltaAum - perfEffect;
+}
+function typeTag(type) {
+  var map = {equity:'tag-equity', mixed:'tag-mixed', bond:'tag-bond'};
+  var label = {equity:T('股票','Equity'), mixed:T('混合','Mixed'), bond:T('债券','Bond')};
+  return '<span class="tag '+map[type]+'">'+label[type]+'</span>';
+}
+
+// ============================================================
+// PLOTLY LAYOUT DEFAULTS
+// ============================================================
+var PLOTLY_LAYOUT = {
+  paper_bgcolor: '#f4f6fb',
+  plot_bgcolor: 'white',
+  font: {family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", size: 12, color: '#333'},
+  margin: {t:40, b:50, l:60, r:20},
+  hovermode: 'x unified',
+  legend: {bgcolor:'rgba(255,255,255,0.95)', bordercolor:'#e0e0e0', borderwidth:1, font:{size:11}},
+  xaxis: {gridcolor:'#eee', linecolor:'#ccc'},
+  yaxis: {gridcolor:'#eee', linecolor:'#ccc'},
+};
+var PLOTLY_CFG = {responsive:true, displayModeBar:false};
+
+// ============================================================
+// RENDER ALL
+// ============================================================
+
+function renderAll() {
+  renderKPIs();
+  renderNAVChart('all');
+  renderAUMChart();
+  renderPSITable();
+  renderPSIBarChart();
+  renderInvestorTable();
+  renderTimeline();
+  renderSourcesTable();
+}
+
+// ── KPI Cards ──
+function renderKPIs() {
+  var gvFunds = FUNDS.filter(function(f){return f.gvQualified;});
+  var totalAum = gvFunds.reduce(function(s,f){return s+getLatestAum(f);},0);
+  var estNetInflow = gvFunds.reduce(function(s,f){return s+estimateNetFlow(f,'2023-09-30','2026-02-27');},0);
+  var latestPsi = PSI_DATA.timeSeries[PSI_DATA.timeSeries.length-1].value;
+  var psiRelevantFunds = gvFunds.filter(function(f){return f.ptEquityPct > 0.05;});
+  var psiRelevantNetFlow = psiRelevantFunds.reduce(function(s,f){
+    var nf = estimateNetFlow(f,'2023-09-30','2026-02-27');
+    return s + nf * f.ptEquityPct * f.psiOverlap;
+  },0);
+
+  document.getElementById('kpi-cards').innerHTML =
+    '<div class="s-card"><div class="s-label">'+T('开放式基金总AUM','Total GV Fund AUM')+'</div>'+
+    '<div class="s-val" style="color:#1a237e">'+fmtEur(totalAum)+'</div>'+
+    '<div class="s-sub">'+T('9只GV合格开放式基金','9 GV-qualifying open-ended funds')+'</div></div>'+
+
+    '<div class="s-card"><div class="s-label">'+T('2023-10后估算净流入','Est. Net Inflow Post Oct-23')+'</div>'+
+    '<div class="s-val" style="color:#2e7d32">'+fmtEur(estNetInflow)+'</div>'+
+    '<div class="s-sub">= \u0394AUM - '+T('市场表现贡献','Market Performance')+'</div></div>'+
+
+    '<div class="s-card"><div class="s-label">'+T('PSI最新点位','PSI Latest')+'</div>'+
+    '<div class="s-val" style="color:#1a237e">'+latestPsi.toLocaleString()+'</div>'+
+    '<div class="s-sub">YTD 2025: +'+(PSI_DATA.ytd2025*100).toFixed(1)+'%</div></div>'+
+
+    '<div class="s-card"><div class="s-label">'+T('净流入\u2192PSI新增买入力','Net Inflow \u2192 PSI Buying Power')+'</div>'+
+    '<div class="s-val" style="color:#e65100">'+fmtEur(psiRelevantNetFlow)+'</div>'+
+    '<div class="s-sub">'+T('占PSI自由流通市值','% of PSI Float')+' '+fmtPct(psiRelevantNetFlow/PSI_DATA.freeFloatMcap)+'</div></div>';
+}
+
+// ── NAV Performance Chart ──
+var NAV_CONFIGS = [
+  {id:'imga', label:'IMGA', labelEn:'IMGA', type:'equity', ref:false},
+  {id:'optimize', label:'Optimize', labelEn:'Optimize', type:'mixed', ref:false},
+  {id:'sixty', label:'Sixty\u00B0', labelEn:'Sixty\u00B0', type:'equity', ref:false},
+  {id:'plo', label:'PLO', labelEn:'PLO', type:'equity', ref:false},
+  {id:'goldenincome', label:'Golden Income', labelEn:'Golden Income', type:'bond', ref:false},
+  {id:'atlanticbond', label:'Atlantic Bond', labelEn:'Atlantic Bond', type:'bond', ref:false},
+  {id:'heedtop', label:'Heed Top', labelEn:'Heed Top', type:'bond', ref:false},
+  {id:'bpi', label:'BPI ('+'\u53C2\u8003'+')', labelEn:'BPI (ref)', type:'equity', ref:true},
+  {id:'gnb', label:'GNB ('+'\u53C2\u8003'+')', labelEn:'GNB (ref)', type:'equity', ref:true},
+];
+var POST_REG = '2023-10-07';
+
+function renderNAVChart(typeFilter) {
+  var traces = [];
+  NAV_CONFIGS.forEach(function(c) {
+    if (typeFilter !== 'all' && c.type !== typeFilter) return;
+    var allData = NAV_DATA[c.id];
+    if (!allData || allData.length < 2) return;
+    var fund = FUNDS.filter(function(f){return f.id===c.id;})[0];
+    var preReg = allData.filter(function(d){return d.date <= POST_REG;});
+    var postReg = allData.filter(function(d){return d.date > POST_REG;});
+    var base, series;
+    if (preReg.length > 0 && postReg.length > 0) {
+      base = preReg[preReg.length-1].nav;
+      series = [preReg[preReg.length-1]].concat(postReg);
+    } else {
+      base = allData[0].nav;
+      series = allData;
+    }
+    traces.push({
+      x: series.map(function(d){return d.date;}),
+      y: series.map(function(d){return (d.nav/base)*100;}),
+      name: c.label,
+      mode: 'lines+markers',
+      line: {color:fund?fund.color:'#999', width:c.ref?1.5:2.5, dash:c.ref?'dot':'solid'},
+      marker: {size:c.ref?3:4},
+      hovertemplate: '%{x}<br>'+c.label+': %{y:.1f}<extra></extra>',
+    });
+  });
+
+  var layout = JSON.parse(JSON.stringify(PLOTLY_LAYOUT));
+  layout.title = {text:T('新规后净值走势对比 (2023-10-07 = 100)','Post-Regulation NAV Performance (Base = 100)'), font:{size:15,color:'#1a237e'}};
+  layout.yaxis.title = T('归一化净值','Normalized NAV');
+  layout.height = 420;
+  layout.shapes = [{type:'line',y0:100,y1:100,x0:0,x1:1,xref:'paper',line:{color:'#bbb',width:1,dash:'dot'}}];
+
+  Plotly.newPlot('chart-nav', traces, layout, PLOTLY_CFG);
+}
+
+// NAV filter buttons
+document.querySelectorAll('#navFilters .filter-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('#navFilters .filter-btn').forEach(function(b){b.classList.remove('active');});
+    btn.classList.add('active');
+    renderNAVChart(btn.dataset.type);
+  });
+});
+
+// ── AUM Evolution Chart ──
+function renderAUMChart() {
+  var traces = [];
+  FUNDS.forEach(function(f) {
+    if (f.aum.length < 2) return;
+    traces.push({
+      x: f.aum.map(function(d){return d.date;}),
+      y: f.aum.map(function(d){return d.value;}),
+      name: f.short + (f.gvQualified?'':' (ref)'),
+      mode: 'lines+markers',
+      line: {color:f.color, width:2},
+      marker: {size:5},
+      hovertemplate: '%{x}<br>'+f.short+': \u20AC%{y:.1f}M<extra></extra>',
+    });
+  });
+
+  var layout = JSON.parse(JSON.stringify(PLOTLY_LAYOUT));
+  layout.title = {text:T('基金规模变化 (\u20ACM)','AUM Evolution (\u20ACM)'), font:{size:15,color:'#1a237e'}};
+  layout.yaxis.title = '\u20AC Millions';
+  layout.yaxis.type = 'log';
+  layout.height = 420;
+
+  Plotly.newPlot('chart-aum', traces, layout, PLOTLY_CFG);
+}
+
+// ── PSI Impact Table ──
+function renderPSITable() {
+  var gvFunds = FUNDS.filter(function(f){return f.gvQualified;});
+  gvFunds.sort(function(a,b){
+    var nfB = Math.max(0,estimateNetFlow(b,'2023-09-30','2026-02-27'))*b.ptEquityPct*b.psiOverlap;
+    var nfA = Math.max(0,estimateNetFlow(a,'2023-09-30','2026-02-27'))*a.ptEquityPct*a.psiOverlap;
+    return nfB - nfA;
+  });
+  var tbody = document.getElementById('psi-table-body');
+  var html = '';
+  var totalBP = 0;
+  gvFunds.forEach(function(f){
+    var nf = estimateNetFlow(f,'2023-09-30','2026-02-27');
+    var newBuy = Math.max(0,nf)*f.ptEquityPct*f.psiOverlap;
+    var pct = newBuy/PSI_DATA.freeFloatMcap;
+    totalBP += newBuy;
+    var impactTag = f.psiImpact==='NONE'?'<span class="tag tag-none">NONE</span>':'<span class="tag tag-high">'+f.psiImpact+'</span>';
+    html += '<tr>'+
+      '<td><strong>'+f.short+'</strong> '+impactTag+'</td>'+
+      '<td class="num">\u20AC'+nf.toFixed(1)+'M</td>'+
+      '<td class="num">'+(f.ptEquityPct*100).toFixed(0)+'%</td>'+
+      '<td class="num">'+(f.psiOverlap*100).toFixed(0)+'%</td>'+
+      '<td class="num" style="color:'+(newBuy>0?'#e65100':'#999')+'">\u20AC'+newBuy.toFixed(1)+'M</td>'+
+      '<td class="num">'+(pct*100).toFixed(3)+'%</td>'+
+      '</tr>';
+  });
+  html += '<tr style="font-weight:700;border-top:2px solid #1a237e">'+
+    '<td colspan="3">'+T('合计','Total')+'</td><td></td>'+
+    '<td class="num" style="color:#e65100">\u20AC'+totalBP.toFixed(1)+'M</td>'+
+    '<td class="num">'+((totalBP/PSI_DATA.freeFloatMcap)*100).toFixed(3)+'%</td></tr>';
+  tbody.innerHTML = html;
+}
+
+// ── PSI Bar Chart ──
+function renderPSIBarChart() {
+  var gvFunds = FUNDS.filter(function(f){return f.gvQualified;});
+  var data = gvFunds.map(function(f){
+    var nf = Math.max(0,estimateNetFlow(f,'2023-09-30','2026-02-27'));
+    return {name:f.short, value:nf*f.ptEquityPct*f.psiOverlap, color:f.color};
+  }).sort(function(a,b){return b.value-a.value;});
+
+  var trace = {
+    x: data.map(function(d){return d.value;}),
+    y: data.map(function(d){return d.name;}),
+    type: 'bar',
+    orientation: 'h',
+    marker: {color: data.map(function(d){return d.color;}), line:{color:'#fff',width:1}},
+    hovertemplate: '%{y}: \u20AC%{x:.1f}M<extra></extra>',
+  };
+
+  var layout = JSON.parse(JSON.stringify(PLOTLY_LAYOUT));
+  layout.title = {text:T('各基金 PSI 新增买入力 (\u20ACM)','PSI New Buying Power by Fund (\u20ACM)'), font:{size:14,color:'#1a237e'}};
+  layout.xaxis.title = '\u20AC Millions';
+  layout.height = 360;
+  layout.margin.l = 100;
+  layout.showlegend = false;
+
+  Plotly.newPlot('chart-psi-bar', [trace], layout, PLOTLY_CFG);
+}
+
+// ── Investor Table ──
+function renderInvestorTable() {
+  var gvFunds = FUNDS.filter(function(f){return f.gvQualified;});
+  var tbody = document.getElementById('investor-table-body');
+  var html = '';
+  var totalAum = 0, totalInv = 0;
+  gvFunds.forEach(function(f){
+    var aum = getLatestAum(f);
+    var estInv = Math.round(aum / 0.5);
+    var navData = NAV_DATA[f.id];
+    var sinceInception = 'N/A';
+    if (navData && navData.length >= 2) {
+      var ret = ((navData[navData.length-1].nav / navData[0].nav) - 1) * 100;
+      sinceInception = (ret > 0 ? '+' : '') + ret.toFixed(1) + '%';
+    }
+    var verified = f.aum.filter(function(d){return d.verified;}).length;
+    var total = f.aum.length;
+    totalAum += aum;
+    totalInv += estInv;
+    html += '<tr>'+
+      '<td><strong>'+f.short+'</strong></td>'+
+      '<td>'+typeTag(f.type)+'</td>'+
+      '<td class="num">\u20AC'+aum.toFixed(1)+'M</td>'+
+      '<td class="num" style="color:#1a237e;font-weight:700">~'+estInv.toLocaleString()+'</td>'+
+      '<td class="num">'+sinceInception+'</td>'+
+      '<td>'+verified+'/'+total+' '+(total-verified>0?'<span style="color:#f57f17">\u26A0</span>':'')+'</td>'+
+      '</tr>';
+  });
+  tbody.innerHTML = html;
+  document.getElementById('inv-total-aum').textContent = '\u20AC'+totalAum.toFixed(1)+'M';
+  document.getElementById('inv-total-count').textContent = '~'+totalInv.toLocaleString();
+}
+
+// ── Policy Timeline ──
+function renderTimeline() {
+  var el = document.getElementById('timeline-el');
+  var html = '';
+  POLICY_EVENTS.forEach(function(e){
+    html += '<div class="tl-item">'+
+      '<div class="tl-dot '+e.type+'"></div>'+
+      '<div class="tl-date">'+e.date+'</div>'+
+      '<div class="tl-title"><span class="zh">'+e.title+'</span><span class="en">'+(e.titleEn||e.title)+'</span></div>'+
+      '<div class="tl-desc"><span class="zh">'+e.desc+'</span><span class="en">'+(e.descEn||e.desc)+'</span></div>'+
+      '</div>';
+  });
+  el.innerHTML = html;
+}
+
+// ── Sources Table ──
+function renderSourcesTable() {
+  var tbody = document.getElementById('sources-table-body');
+  var html = '';
+  SOURCES.forEach(function(s){
+    html += '<tr>'+
+      '<td><strong><span class="zh">'+s.name+'</span><span class="en">'+(s.nameEn||s.name)+'</span></strong></td>'+
+      '<td><span class="zh">'+s.type+'</span><span class="en">'+(s.typeEn||s.type)+'</span></td>'+
+      '<td>'+s.funds+'</td>'+
+      '<td><a href="'+s.url+'" target="_blank" style="color:#1a237e;font-weight:600">'+(T('打开','Open'))+' \u2192</a></td>'+
+      '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+// ── Initial render ──
+renderAll();
+
+</script>
+</body></html>
